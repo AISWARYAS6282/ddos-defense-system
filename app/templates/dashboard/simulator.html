@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Simulator Config — DDoS Defense{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:1.5rem">
+  <h2 style="font-size:1.5rem;font-weight:700">Simulator Configuration</h2>
+  <p class="text-muted" style="font-size:.875rem;margin-top:.25rem">Adjust synthetic DDoS event generation settings</p>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
+
+  <div class="card">
+    <div class="card-title">Update Parameters</div>
+    <form method="POST">
+      <div class="form-group">
+        <label>Events Per Second (attack_rate)</label>
+        <input type="number" name="attack_rate" value="{{ config.attack_rate }}" min="0.1" max="100" step="0.1"/>
+      </div>
+      <div class="form-group">
+        <label>Attack Ratio (0.0 – 1.0)</label>
+        <input type="number" name="attack_ratio" value="{{ config.attack_ratio }}" min="0" max="1" step="0.05"/>
+      </div>
+      <button type="submit" class="btn btn-primary">Save Config</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Current State</div>
+    <table>
+      <tr><td class="text-muted" style="padding:.4rem 0">Attack Rate</td><td><code>{{ config.attack_rate }}/s</code></td></tr>
+      <tr><td class="text-muted" style="padding:.4rem 0">Attack Ratio</td><td><code>{{ (config.attack_ratio * 100)|int }}%</code></td></tr>
+      <tr><td class="text-muted" style="padding:.4rem 0">Attack Types</td><td><code>{{ config.attack_types|join(', ') }}</code></td></tr>
+      <tr><td class="text-muted" style="padding:.4rem 0">Normal IPs</td><td><code>{{ config.normal_ip_pool|length }} IPs</code></td></tr>
+      <tr><td class="text-muted" style="padding:.4rem 0">Attacker IPs</td><td><code>{{ config.attacker_ip_pool|length }} IPs</code></td></tr>
+      <tr><td class="text-muted" style="padding:.4rem 0">Last Updated By</td><td>{{ config.updated_by or '—' }}</td></tr>
+    </table>
+  </div>
+
+</div>
+
+<div class="card">
+  <div class="card-title">How to Run the Simulator</div>
+  <p class="text-muted" style="margin-bottom:.75rem;font-size:.875rem">Run this command from the project root. Events are emitted as JSON to stdout. Use the POST hook to ingest events:</p>
+  <pre>
+# Basic run (uses rate from DB config)
+python simulator/simulator.py
+
+# With custom rate
+SIM_RATE=5 python simulator/simulator.py
+
+# Pipe events into the API endpoint
+python simulator/simulator.py | while read line; do
+  curl -s -X POST http://localhost:5000/api/simulator/event \
+    -H "Content-Type: application/json" -d "$line";
+done
+  </pre>
+  <p class="text-muted" style="margin-top:.75rem;font-size:.8rem">⚠ Sandbox agent is stubbed — no real iptables until Division 3.</p>
+</div>
+
+{% endblock %}

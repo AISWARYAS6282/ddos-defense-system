@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login — DDoS Defense System</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0e1a; --surface: #111827; --surface2: #1f2937; --border: #374151;
+      --primary: #3b82f6; --danger: #ef4444; --text: #f3f4f6; --muted: #9ca3af;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    }
+    .login-wrap { width: 100%; max-width: 400px; padding: 1.5rem; }
+    .logo { text-align: center; margin-bottom: 2rem; }
+    .logo h1 { font-size: 1.75rem; font-weight: 700; color: var(--primary); }
+    .logo p { color: var(--muted); font-size: .9rem; margin-top: .25rem; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 2rem;
+    }
+    .form-group { margin-bottom: 1.2rem; }
+    label { display: block; font-size: .875rem; color: var(--muted); margin-bottom: .4rem; }
+    input[type="text"], input[type="password"] {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); padding: .65rem .85rem; border-radius: 8px; font-size: .9rem;
+      outline: none; transition: border-color .2s;
+    }
+    input:focus { border-color: var(--primary); }
+    .btn-login {
+      width: 100%; padding: .7rem; background: var(--primary); color: #fff;
+      border: none; border-radius: 8px; font-size: 1rem; font-weight: 600;
+      cursor: pointer; transition: opacity .2s; margin-top: .5rem;
+    }
+    .btn-login:hover { opacity: .88; }
+    .alert {
+      padding: .65rem .9rem; border-radius: 6px; margin-bottom: 1rem;
+      font-size: .875rem; background: #450a0a; border-left: 4px solid var(--danger); color: #fca5a5;
+    }
+    .remember-row { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; }
+    .remember-row input { width: auto; }
+    .remember-row label { margin: 0; color: var(--muted); font-size: .85rem; cursor: pointer; }
+    .footer-note { text-align: center; margin-top: 1.5rem; color: var(--muted); font-size: .8rem; }
+  </style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="logo">
+    <h1>🛡 DDoS Defense</h1>
+    <p>Network Threat Response System</p>
+  </div>
+  <div class="card">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('auth.login') }}">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" placeholder="Enter username" autocomplete="username" required autofocus/>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Enter password" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input type="checkbox" id="remember" name="remember"/>
+        <label for="remember">Keep me logged in</label>
+      </div>
+      <button type="submit" class="btn-login">Sign In</button>
+    </form>
+  </div>
+  <p class="footer-note">Division 1 — Foundation &amp; Safe Sandbox</p>
+</div>
+</body>
+</html>

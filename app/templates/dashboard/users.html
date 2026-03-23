@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Users — DDoS Defense{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:1.5rem">
+  <h2 style="font-size:1.5rem;font-weight:700">User Management</h2>
+  <p class="text-muted" style="font-size:.875rem;margin-top:.25rem">{{ users|length }} registered users</p>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Username</th><th>Email</th><th>Role</th><th>Created</th><th>Last Login</th><th>Active</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td><strong>{{ u.username }}</strong> {% if u.id == current_user.id %}<span class="text-muted">(you)</span>{% endif %}</td>
+          <td class="text-muted">{{ u.email }}</td>
+          <td>
+            {% if u.is_admin() %}
+            <span style="background:#1c0a00;color:#fcd34d;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:600">ADMIN</span>
+            {% else %}
+            <span style="background:var(--surface2);color:var(--muted);padding:2px 8px;border-radius:12px;font-size:.75rem">OPERATOR</span>
+            {% endif %}
+          </td>
+          <td class="text-muted">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+          <td class="text-muted">{{ u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else '—' }}</td>
+          <td>
+            {% if u.is_active %}
+            <span class="text-success">✓</span>
+            {% else %}
+            <span class="text-danger">✗</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

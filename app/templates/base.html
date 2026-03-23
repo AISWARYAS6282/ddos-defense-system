@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}DDoS Defense System{% endblock %}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0e1a;
+      --surface: #111827;
+      --surface2: #1f2937;
+      --border: #374151;
+      --primary: #3b82f6;
+      --primary-dark: #2563eb;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --font: 'Segoe UI', system-ui, sans-serif;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+
+    /* NAV */
+    nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      display: flex; align-items: center; gap: 2rem; height: 56px;
+    }
+    nav .brand { font-weight: 700; font-size: 1.1rem; color: var(--primary); letter-spacing: .5px; }
+    nav a { color: var(--muted); text-decoration: none; font-size: .9rem; transition: color .2s; }
+    nav a:hover, nav a.active { color: var(--text); }
+    nav .spacer { flex: 1; }
+    nav .user-info { color: var(--muted); font-size: .85rem; }
+    nav .badge {
+      background: var(--primary); color: #fff;
+      padding: 2px 8px; border-radius: 12px; font-size: .75rem; margin-left: 6px;
+    }
+    nav .badge.admin { background: var(--warning); color: #000; }
+
+    /* LAYOUT */
+    .container { max-width: 1280px; margin: 0 auto; padding: 2rem; }
+
+    /* ALERTS */
+    .flash-messages { margin-bottom: 1rem; }
+    .alert {
+      padding: .75rem 1rem; border-radius: 6px; margin-bottom: .5rem;
+      font-size: .9rem; border-left: 4px solid;
+    }
+    .alert-danger  { background: #450a0a; border-color: var(--danger); color: #fca5a5; }
+    .alert-success { background: #052e16; border-color: var(--success); color: #86efac; }
+    .alert-info    { background: #0c1a2e; border-color: var(--primary); color: #93c5fd; }
+    .alert-warning { background: #1c0a00; border-color: var(--warning); color: #fcd34d; }
+
+    /* CARDS */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem;
+    }
+    .card-title { font-size: 1rem; font-weight: 600; color: var(--muted); margin-bottom: 1rem; text-transform: uppercase; letter-spacing: .5px; }
+
+    /* STATS ROW */
+    .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+    }
+    .stat-card .stat-label { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .stat-card .stat-value { font-size: 2rem; font-weight: 700; margin-top: .25rem; }
+    .stat-card .stat-value.danger { color: var(--danger); }
+    .stat-card .stat-value.success { color: var(--success); }
+    .stat-card .stat-value.primary { color: var(--primary); }
+
+    /* TABLE */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    th { background: var(--surface2); color: var(--muted); text-align: left; padding: .6rem 1rem; font-weight: 600; text-transform: uppercase; font-size: .75rem; letter-spacing: .5px; }
+    td { padding: .6rem 1rem; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+
+    /* BADGES */
+    .badge-severity {
+      display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600;
+    }
+    .sev-high   { background: #450a0a; color: #fca5a5; }
+    .sev-medium { background: #1c0a00; color: #fcd34d; }
+    .sev-low    { background: #052e16; color: #86efac; }
+    .sev-none   { background: var(--surface2); color: var(--muted); }
+
+    /* BUTTONS */
+    .btn {
+      display: inline-block; padding: .5rem 1.25rem; border-radius: 6px;
+      font-size: .875rem; font-weight: 500; cursor: pointer; border: none;
+      text-decoration: none; transition: opacity .2s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+
+    /* FORMS */
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-size: .875rem; color: var(--muted); margin-bottom: .35rem; }
+    input[type="text"], input[type="password"], input[type="email"], input[type="number"], select {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); padding: .55rem .75rem; border-radius: 6px; font-size: .875rem;
+      outline: none; transition: border-color .2s;
+    }
+    input:focus, select:focus { border-color: var(--primary); }
+
+    /* CODE */
+    code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-size: .85rem; color: #93c5fd; }
+    pre  { background: var(--surface2); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: .85rem; color: var(--text); }
+
+    /* UTIL */
+    .text-muted  { color: var(--muted); }
+    .text-danger { color: var(--danger); }
+    .text-success{ color: var(--success); }
+    .mt-1 { margin-top: .5rem; }
+    .mt-2 { margin-top: 1rem; }
+    .flex { display: flex; align-items: center; gap: .75rem; }
+    .justify-between { justify-content: space-between; }
+  </style>
+</head>
+<body>
+
+{% if current_user.is_authenticated %}
+<nav>
+  <span class="brand">🛡 DDoS Defense</span>
+  <a href="{{ url_for('dashboard.index') }}">Dashboard</a>
+  <a href="{{ url_for('dashboard.blocked_ips') }}">Blocked IPs</a>
+  {% if current_user.is_admin() %}
+  <a href="{{ url_for('dashboard.simulator') }}">Simulator</a>
+  <a href="{{ url_for('dashboard.users') }}">Users</a>
+  {% endif %}
+  <span class="spacer"></span>
+  <span class="user-info">
+    {{ current_user.username }}
+    <span class="badge {{ 'admin' if current_user.is_admin() else '' }}">{{ current_user.role }}</span>
+  </span>
+  <a href="{{ url_for('auth.logout') }}">Logout</a>
+</nav>
+{% endif %}
+
+<div class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-messages">
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</div>
+
+</body>
+</html>

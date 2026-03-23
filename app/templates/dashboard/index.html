@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% block title %}Live Dashboard — DDoS Defense{% endblock %}
+
+{% macro severity_badge(s) %}
+  {% set styles = {
+    'critical': 'background:#1a0505;color:#fca5a5;border:1px solid #7f1d1d',
+    'high':     'background:#450a0a;color:#fca5a5;border:1px solid #991b1b',
+    'medium':   'background:#1c0a00;color:#fcd34d;border:1px solid #92400e',
+    'low':      'background:#052e16;color:#86efac;border:1px solid #166534'
+  } %}
+  <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;{{ styles.get(s, 'background:var(--surface2);color:var(--muted)') }}" >{{ (s or '—')|upper }}</span>
+{% endmacro %}
+
+{% macro status_badge(s) %}
+  {% if s == 'active' %}<span style="color:var(--danger);font-size:.8rem;font-weight:600">● active</span>
+  {% elif s == 'blocked' %}<span style="color:#f59e0b;font-size:.8rem;font-weight:600">🔒 blocked</span>
+  {% elif s == 'ignored' %}<span style="color:var(--muted);font-size:.8rem">— ignored</span>
+  {% else %}<span class="text-muted" style="font-size:.8rem">{{ s }}</span>{% endif %}
+{% endmacro %}
+
+{% block content %}
+
+<!-- Header -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem">
+  <div>
+    <h2 style="font-size:1.5rem;font-weight:700;letter-spacing:-.5px">Live Threat Dashboard</h2>
+    <p class="text-muted" style="font-size:.85rem;margin-top:.2rem">Division 2 — Real-time Detection Engine &amp; WebSocket Alerts</p>
+  </div>
+  <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+    <span id="ws-indicator" style="font-size:.8rem;padding:4px 12px;border-radius:20px;background:#1c0a00;color:#f59e0b;border:1px solid #92400e">⬤ Connecting…</span>
+    {% if current_user.is_admin() %}
+    <button id="simToggleBtn" onclick="toggleSimulator()"
+      class="btn {{ 'btn-danger' if sim_running else 'btn-primary' }}"
+      style="min-width:130px">
+      {{ '⏹ Stop Sim' if sim_running else '▶ Start Sim' }}
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-row" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:1.25rem">
+  <div class="stat-card">
+    <div class="stat-label">Active Alerts</div>
+    <div class="stat-value danger" id="stat-active">{{ active_alerts }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Detected</div>
+    <div class="stat-value primary" id="stat-total">{{ total_attacks }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Blocked IPs</div>
+    <div class="stat-value" style="color:#f59e0b" id="stat-blocked">{{ total_blocked }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Events/sec</div>
+    <div class="stat-value success" id="stat-eps">{{ sim_config.attack_rate if sim_config else '—' }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Simulator</div>
+    <div id="stat-sim" class="stat-value" style="font-size:1rem;color:{{ '#22c55e' if sim_running else '#6b7280' }}">
+      {{ '● RUNNING' if sim_running else '○ STOPPED' }}
+    </div>
+  </div>
+</div>
+
+<!-- Live ticker -->
+<div class="card" style="padding:.9rem 1.5rem;margin-bottom:1rem">
+  <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem">
+    <span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Live Traffic Feed</span>
+    <span id="ticker-dot" style="width:7px;height:7px;border-radius:50%;background:#374151;display:inline-block;transition:background .15s"></span>
+  </div>
+  <div id="ticker" style="font-family:'Courier New',monospace;font-size:.82rem;color:var(--muted);height:22px;overflow:hidden;white-space:nowrap">
+    Waiting for simulator…
+  </div>
+</div>
+
+<!-- Alert table -->
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
+    <div style="display:flex;align-items:center;gap:.6rem">
+      <span class="card-title" style="margin:0">Threat Alerts</span>
+      <span id="alert-count-badge" style="background:var(--danger);color:#fff;padding:2px 9px;border-radius:12px;font-size:.75rem;font-weight:600">{{ active_alerts }}</span>
+    </div>
+    <div style="display:flex;gap:.4rem">
+      {% for f in ['all', 'active', 'blocked', 'ignored'] %}
+      <button onclick="filterAlerts('{{ f }}')" class="btn btn-ghost filter-btn {{ 'active' if f == 'all' else '' }}" data-f="{{ f }}"
+        style="padding:.3rem .8rem;font-size:.78rem">{{ f|title }}</button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="alert-table">
+      <thead>
+        <tr>
+          <th>ID</th><th>Source IP</th><th>Attack Type</th>
+          <th>Severity</th><th>Confidence</th><th>Pkts/60s</th>
+          <th>Status</th><th>Time</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="alert-tbody">
+        {% for a in recent_attacks %}
+        <tr id="row-{{ a.id }}" data-status="{{ a.status }}" data-ip="{{ a.source_ip }}">
+          <td class="text-muted" style="font-size:.8rem">{{ a.id }}</td>
+          <td><code>{{ a.source_ip }}</code></td>
+          <td><span style="color:#93c5fd;font-size:.85rem">{{ a.attack_type or 'RATE_ANOMALY' }}</span></td>
+          <td>{{ severity_badge(a.severity) }}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:.4rem">
+              <div style="width:56px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
+                <div style="width:{{ (a.confidence * 100)|int }}%;height:100%;background:{% if a.confidence > 0.75 %}var(--danger){% elif a.confidence > 0.5 %}#f59e0b{% else %}var(--primary){% endif %}"></div>
+              </div>
+              <span style="font-size:.78rem">{{ (a.confidence * 100)|int }}%</span>
+            </div>
+          </td>
+          <td style="font-size:.82rem">{{ '{:,}'.format(a.packet_count or 0) }}</td>
+          <td>{{ status_badge(a.status) }}</td>
+          <td class="text-muted" style="font-size:.78rem">{{ a.detected_at.strftime('%H:%M:%S') }}</td>
+          <td>
+            {% if a.status == 'active' %}
+            <div style="display:flex;gap:.3rem">
+              <button class="btn btn-danger" style="padding:.22rem .65rem;font-size:.75rem"
+                onclick="blockIP('{{ a.source_ip }}','{{ a.id }}',this)">Block</button>
+              <button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
+                onclick="ignoreAlert({{ a.id }},this)">Ignore</button>
+            </div>
+            {% elif a.status == 'blocked' %}
+            <button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
+              onclick="unblockIP('{{ a.source_ip }}',this)">Unblock</button>
+            {% else %}<span class="text-muted" style="font-size:.8rem">—</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr id="no-data-row">
+          <td colspan="9" style="text-align:center;padding:2.5rem;color:var(--muted)">
+            No alerts yet — click <strong>▶ Start Sim</strong> to generate traffic
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" style="position:fixed;bottom:1.5rem;right:1.5rem;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:.75rem 1.25rem;
+  font-size:.875rem;transform:translateY(120px);opacity:0;transition:all .3s;
+  z-index:9999;max-width:340px;pointer-events:none"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<script>
+let currentFilter = 'all';
+let simRunning = {{ 'true' if sim_running else 'false' | safe }};
+let epsEvents = 0, epsLast = Date.now();
+
+// ─── WebSocket ────────────────────────────────────────────────────────────
+const socket = io({ transports: ['websocket','polling'] });
+
+socket.on('connect',       () => wsStatus('connected'));
+socket.on('disconnect',    () => wsStatus('disconnected'));
+socket.on('connect_error', () => wsStatus('error'));
+
+socket.on('sim_event', ev => {
+  epsEvents++;
+  const col = ev.is_attack ? '#ef4444' : '#6b7280';
+  const tag = ev.is_attack ? `⚠ ${ev.type}` : '✓ normal';
+  document.getElementById('ticker').innerHTML =
+    `<span style="color:${col}">${tag}</span>  ·  ${ev.ip}  ·  ${(ev.packets||0).toLocaleString()} pkts  ·  ${(ev.timestamp||'').slice(11,19)}`;
+  flash('ticker-dot', ev.is_attack ? '#ef4444' : '#22c55e');
+
+  const now = Date.now();
+  if (now - epsLast > 2000) {
+    document.getElementById('stat-eps').textContent =
+      (epsEvents / ((now - epsLast) / 1000)).toFixed(1);
+    epsEvents = 0; epsLast = now;
+  }
+});
+
+socket.on('alert', a => {
+  prependRow(a);
+  refreshStats();
+  toast(`⚠ ${(a.severity||'').toUpperCase()}: ${a.source_ip} — ${a.attack_type||''}`,
+    (a.severity === 'critical' || a.severity === 'high') ? '#ef4444' : '#f59e0b');
+});
+
+socket.on('ip_blocked', d => {
+  markBlocked(d.ip);
+  refreshStats();
+  toast(`🔒 ${d.ip} blocked by ${d.blocked_by}`, '#22c55e');
+});
+
+socket.on('ip_unblocked', d => {
+  refreshStats();
+  toast(`🔓 ${d.ip} unblocked`, '#3b82f6');
+});
+
+socket.on('alert_ignored', d => {
+  const row = document.getElementById(`row-${d.attack_id}`);
+  if (row) {
+    row.dataset.status = 'ignored';
+    row.cells[6].innerHTML = sBadge('ignored');
+    row.cells[8].innerHTML = '<span class="text-muted" style="font-size:.8rem">—</span>';
+  }
+  refreshStats();
+});
+
+socket.on('sim_status', d => {
+  simRunning = d.running;
+  updateSimBtn();
+  const el = document.getElementById('stat-sim');
+  el.textContent = d.running ? '● RUNNING' : '○ STOPPED';
+  el.style.color = d.running ? '#22c55e' : '#6b7280';
+});
+
+// ─── Row builder ──────────────────────────────────────────────────────────
+function prependRow(a) {
+  document.getElementById('no-data-row')?.remove();
+  const tbody = document.getElementById('alert-tbody');
+  const tr = document.createElement('tr');
+  tr.id = `row-${a.id}`; tr.dataset.status = 'active'; tr.dataset.ip = a.source_ip;
+  tr.style.cssText = 'animation:fadeIn .35s ease';
+  const conf = a.confidence || 0;
+  const barColor = conf > 75 ? 'var(--danger)' : conf > 50 ? '#f59e0b' : 'var(--primary)';
+  const ts = a.timestamp ? new Date(a.timestamp * 1000).toTimeString().slice(0,8) : '--:--:--';
+  tr.innerHTML = `
+    <td class="text-muted" style="font-size:.8rem">${a.id}</td>
+    <td><code>${a.source_ip}</code></td>
+    <td><span style="color:#93c5fd;font-size:.85rem">${a.attack_type||'RATE_ANOMALY'}</span></td>
+    <td>${sevBadge(a.severity)}</td>
+    <td><div style="display:flex;align-items:center;gap:.4rem">
+      <div style="width:56px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
+        <div style="width:${conf}%;height:100%;background:${barColor}"></div></div>
+      <span style="font-size:.78rem">${conf}%</span></div></td>
+    <td style="font-size:.82rem">${(a.packet_count||0).toLocaleString()}</td>
+    <td>${sBadge('active')}</td>
+    <td class="text-muted" style="font-size:.78rem">${ts}</td>
+    <td><div style="display:flex;gap:.3rem">
+      <button class="btn btn-danger" style="padding:.22rem .65rem;font-size:.75rem"
+        onclick="blockIP('${a.source_ip}','${a.id}',this)">Block</button>
+      <button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
+        onclick="ignoreAlert(${a.id},this)">Ignore</button>
+    </div></td>`;
+  tbody.insertBefore(tr, tbody.firstChild);
+  applyFilter();
+  if (tbody.rows.length > 200) tbody.deleteRow(tbody.rows.length - 1);
+  document.getElementById('alert-count-badge').textContent =
+    parseInt(document.getElementById('stat-active').textContent || 0) + 1;
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────
+async function blockIP(ip, id, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  const r = await fetch('/api/block', { method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ip, reason:'Dashboard block'}) });
+  if (!r.ok) { const d=await r.json(); toast(`✗ ${d.error}`,'#ef4444'); btn.disabled=false; btn.textContent='Block'; }
+}
+
+async function unblockIP(ip, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  const r = await fetch('/api/unblock', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip}) });
+  if (!r.ok) { const d=await r.json(); toast(`✗ ${d.error}`,'#ef4444'); btn.disabled=false; btn.textContent='Unblock'; }
+}
+
+async function ignoreAlert(id, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  const r = await fetch('/api/ignore', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({attack_id:id}) });
+  if (!r.ok) { const d=await r.json(); toast(`✗ ${d.error}`,'#ef4444'); btn.disabled=false; btn.textContent='Ignore'; }
+}
+
+async function toggleSimulator() {
+  document.getElementById('simToggleBtn').disabled = true;
+  await fetch(simRunning ? '/api/simulator/stop' : '/api/simulator/start', {method:'POST'});
+  document.getElementById('simToggleBtn').disabled = false;
+}
+
+function updateSimBtn() {
+  const b = document.getElementById('simToggleBtn');
+  if (!b) return;
+  b.textContent = simRunning ? '⏹ Stop Sim' : '▶ Start Sim';
+  b.className = 'btn ' + (simRunning ? 'btn-danger' : 'btn-primary');
+  b.style.minWidth = '130px';
+}
+
+// ─── Filter ───────────────────────────────────────────────────────────────
+function filterAlerts(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    const on = b.dataset.f === f;
+    b.classList.toggle('active', on);
+    b.style.color = on ? 'var(--text)' : '';
+    b.style.borderColor = on ? 'var(--primary)' : '';
+  });
+  applyFilter();
+}
+function applyFilter() {
+  document.querySelectorAll('#alert-tbody tr[data-status]').forEach(r => {
+    r.style.display = (currentFilter === 'all' || r.dataset.status === currentFilter) ? '' : 'none';
+  });
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function markBlocked(ip) {
+  document.querySelectorAll(`#alert-tbody tr[data-ip="${ip}"]`).forEach(r => {
+    if (r.dataset.status === 'active') {
+      r.dataset.status = 'blocked';
+      r.cells[6].innerHTML = sBadge('blocked');
+      r.cells[8].innerHTML = `<button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
+        onclick="unblockIP('${ip}',this)">Unblock</button>`;
+    }
+  });
+  applyFilter();
+}
+
+async function refreshStats() {
+  try {
+    const d = await (await fetch('/api/stats')).json();
+    document.getElementById('stat-active').textContent  = d.active_alerts;
+    document.getElementById('stat-total').textContent   = d.total_attacks;
+    document.getElementById('stat-blocked').textContent = d.blocked_ips;
+    document.getElementById('alert-count-badge').textContent = d.active_alerts;
+  } catch(e) {}
+}
+
+function sevBadge(s) {
+  const m = {critical:'background:#1a0505;color:#fca5a5;border:1px solid #7f1d1d',
+             high:'background:#450a0a;color:#fca5a5;border:1px solid #991b1b',
+             medium:'background:#1c0a00;color:#fcd34d;border:1px solid #92400e',
+             low:'background:#052e16;color:#86efac;border:1px solid #166534'}
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;${m[s]||'background:var(--surface2);color:var(--muted)'}">${(s||'—').toUpperCase()}</span>`;
+}
+
+function sBadge(s) {
+  return {
+    active:  '<span style="color:var(--danger);font-size:.8rem;font-weight:600">● active</span>',
+    blocked: '<span style="color:#f59e0b;font-size:.8rem;font-weight:600">🔒 blocked</span>',
+    ignored: '<span style="color:var(--muted);font-size:.8rem">— ignored</span>',
+  }[s] || s;
+}
+
+function wsStatus(state) {
+  const el = document.getElementById('ws-indicator');
+  const c = { connected:{t:'⬤ Live',bg:'#052e16',col:'#86efac',b:'#166534'},
+    disconnected:{t:'⬤ Disconnected',bg:'#1c0a00',col:'#fcd34d',b:'#92400e'},
+    error:{t:'⬤ Error',bg:'#450a0a',col:'#fca5a5',b:'#991b1b'} }[state] ||
+    {t:'⬤ Connecting…',bg:'#1c0a00',col:'#f59e0b',b:'#92400e'};
+  el.textContent = c.t; el.style.background = c.bg;
+  el.style.color = c.col; el.style.borderColor = c.b;
+}
+
+function flash(id, color) {
+  const el = document.getElementById(id);
+  el.style.background = color;
+  setTimeout(() => el.style.background = '#374151', 250);
+}
+
+function toast(msg, color = 'var(--text)') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.color = color; t.style.borderColor = color;
+  t.style.transform = 'translateY(0)'; t.style.opacity = '1';
+  clearTimeout(t._t);
+  t._t = setTimeout(() => { t.style.transform='translateY(120px)'; t.style.opacity='0'; }, 3500);
+}
+
+document.head.insertAdjacentHTML('beforeend',
+  '<style>@keyframes fadeIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}.filter-btn.active{border-color:var(--primary)!important;color:var(--text)!important}</style>');
+
+filterAlerts('all');
+setInterval(refreshStats, 10000);
+</script>
+{% endblock %}

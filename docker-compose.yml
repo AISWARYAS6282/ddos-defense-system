@@ -1,0 +1,61 @@
+services:
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ddosuser
+      POSTGRES_PASSWORD: ddospass
+      POSTGRES_DB: ddosdefense
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ddosuser -d ddosdefense"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: ["python", "run.py"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://ddosuser:ddospass@db:5432/ddosdefense
+      SANDBOX_AGENT_URL: http://sandbox_agent:5001
+      FLASK_ENV: development
+    ports:
+      - "5000:5000"
+    networks:
+      - internal
+      - external
+
+  sandbox_agent:
+    build:
+      context: ./sandbox_agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SANDBOX_AGENT_TOKEN: change-me-sandbox-token
+      AGENT_PORT: "5001"
+    ports:
+      - "5001:5001"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+  external:
+    driver: bridge
+
+volumes:
+  pgdata:
+    driver: local

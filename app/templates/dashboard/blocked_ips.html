@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Blocked IPs — DDoS Defense{% endblock %}
+{% block content %}
+
+<div class="flex justify-between" style="margin-bottom:1.5rem">
+  <div>
+    <h2 style="font-size:1.5rem;font-weight:700">Blocked IPs</h2>
+    <p class="text-muted" style="font-size:.875rem;margin-top:.25rem">{{ ips|selectattr('is_active')|list|length }} active blocks</p>
+  </div>
+</div>
+
+<div class="card">
+  {% if ips %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>IP Address</th><th>Reason</th><th>Blocked By</th><th>Blocked At</th><th>Status</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        {% for ip in ips %}
+        <tr>
+          <td><code>{{ ip.ip_address }}</code></td>
+          <td>{{ ip.reason or '—' }}</td>
+          <td>{{ ip.blocked_by or '—' }}</td>
+          <td class="text-muted">{{ ip.blocked_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            {% if ip.is_active %}
+            <span style="color:var(--danger);font-weight:600">● BLOCKED</span>
+            {% else %}
+            <span class="text-muted">○ Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if ip.is_active %}
+            <button class="btn btn-ghost" style="padding:.3rem .75rem;font-size:.8rem" onclick="unblock('{{ ip.ip_address }}', this)">Unblock</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">No IPs are currently blocked.</p>
+  {% endif %}
+</div>
+
+<script>
+async function unblock(ip, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const r = await fetch('/api/unblock', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ip})
+    });
+    const d = await r.json();
+    if (r.ok) {
+      setTimeout(() => location.reload(), 800);
+    } else {
+      alert(d.error);
+      btn.disabled = false;
+      btn.textContent = 'Unblock';
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Unblock';
+  }
+}
+</script>
+{% endblock %}
