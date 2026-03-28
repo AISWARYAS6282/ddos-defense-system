@@ -22,7 +22,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    entrypoint: ["python", "run.py"]
+    command: ["python", "run.py"]
     depends_on:
       db:
         condition: service_healthy
@@ -31,11 +31,10 @@ services:
       DATABASE_URL: postgresql://ddosuser:ddospass@db:5432/ddosdefense
       SANDBOX_AGENT_URL: http://sandbox_agent:5001
       FLASK_ENV: development
-    ports:
-      - "5000:5000"
     networks:
       - internal
-      - external
+    volumes:
+      - .:/app
 
   sandbox_agent:
     build:
@@ -49,6 +48,21 @@ services:
       - "5001:5001"
     networks:
       - internal
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - internal
+      - external
 
 networks:
   internal:

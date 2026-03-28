@@ -1,25 +1,23 @@
 """
-SimulatorManager — Division 2
-Runs the event generator as a background task using eventlet.spawn directly.
-This avoids the 'NoneType has no attribute start_background_task' error
-that occurs when socketio.server hasn't been initialized yet.
+app/simulator_manager.py  —  Division 3
+Adds ML anomaly scoring to the detection pipeline.
 """
-
 import json
 import os
 import random
 import time
 from datetime import datetime
 
-# Load IP pools
-_pool_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "simulator", "ip_pools.json")
+_pool_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "simulator", "ip_pools.json"
+)
 
 try:
     with open(_pool_path) as f:
         _pools = json.load(f)
-    NORMAL_IPS    = _pools["normal_ips"]
-    ATTACKER_IPS  = _pools["attacker_ips"]
-    ATTACK_TYPES  = _pools["attack_types"]
+    NORMAL_IPS   = _pools["normal_ips"]
+    ATTACKER_IPS = _pools["attacker_ips"]
+    ATTACK_TYPES = _pools["attack_types"]
 except Exception:
     NORMAL_IPS   = ["10.0.0.1", "10.0.0.2", "10.0.0.3"]
     ATTACKER_IPS = ["192.168.100.10", "192.168.100.11", "203.0.113.5"]
@@ -27,24 +25,16 @@ except Exception:
 
 
 def generate_event(blocked_ips: set, attack_ratio: float = 0.3) -> dict:
-    """Generate a single synthetic traffic event, skipping blocked IPs."""
     is_attack = random.random() < attack_ratio
-
     pool      = ATTACKER_IPS if is_attack else NORMAL_IPS
-    available = [ip for ip in pool if ip not in blocked_ips]
-    if not available:
-        available = pool
-
+    available = [ip for ip in pool if ip not in blocked_ips] or pool
     source_ip   = random.choice(available)
     attack_type = random.choice(ATTACK_TYPES) if is_attack else None
-
     severity     = None
     packet_count = random.randint(1, 100)
-
     if is_attack:
         severity = random.choices(
-            ["low", "medium", "high", "critical"],
-            weights=[30, 40, 25, 5]
+            ["low", "medium", "high", "critical"], weights=[30, 40, 25, 5]
         )[0]
         packet_count = {
             "low":      random.randint(200,   2000),
@@ -52,7 +42,6 @@ def generate_event(blocked_ips: set, attack_ratio: float = 0.3) -> dict:
             "high":     random.randint(10000, 50000),
             "critical": random.randint(50000, 200000),
         }[severity]
-
     return {
         "timestamp":      datetime.utcnow().isoformat() + "Z",
         "source_ip":      source_ip,
@@ -68,12 +57,12 @@ def generate_event(blocked_ips: set, attack_ratio: float = 0.3) -> dict:
 
 
 def _run_loop(socketio, app, manager):
-    """Background loop — runs in its own greenlet/thread."""
     from .extensions import db
     from .models.blocked_ip import BlockedIP
     from .models.attack import Attack
     from .models.simulator_config import SimulatorConfig
     from .detector.engine import DetectionEngine
+    from .ml.isolation_forest import anomaly_detector
 
     engine = DetectionEngine()
 
@@ -98,24 +87,38 @@ def _run_loop(socketio, app, manager):
 
                 event = generate_event(blocked, attack_ratio)
 
-                # Emit raw event to live ticker
+                # ── ML scoring ────────────────────────────────────────────
+                ml_result = anomaly_detector.score_event(event)
+
+                # Emit raw event + ML score to live ticker
                 socketio.emit("sim_event", {
-                    "ip":        event["source_ip"],
-                    "is_attack": event["is_attack"],
-                    "type":      event.get("attack_type"),
-                    "packets":   event["packet_count"],
-                    "timestamp": event["timestamp"],
+                    "ip":            event["source_ip"],
+                    "is_attack":     event["is_attack"],
+                    "type":          event.get("attack_type"),
+                    "packets":       event["packet_count"],
+                    "timestamp":     event["timestamp"],
+                    "ml_anomaly":    ml_result["is_anomaly"],
+                    "ml_score":      ml_result["anomaly_score"],
+                    "ml_ready":      ml_result["model_ready"],
                 })
 
-                # Run through detector
+                # ── Rule-based detection ──────────────────────────────────
                 alerts = engine.process_event(event)
 
                 for alert in alerts:
+                    # Blend ML score into confidence
+                    blended_confidence = alert.confidence
+                    if ml_result["model_ready"] and ml_result["is_anomaly"]:
+                        blended_confidence = min(
+                            alert.confidence + ml_result["anomaly_score"] * 0.15,
+                            0.99
+                        )
+
                     attack = Attack(
                         source_ip    = alert.source_ip,
                         attack_type  = alert.attack_type,
                         severity     = alert.severity,
-                        confidence   = alert.confidence,
+                        confidence   = blended_confidence,
                         packet_count = alert.packet_count,
                         status       = "active",
                         is_simulated = alert.is_simulated,
@@ -126,7 +129,41 @@ def _run_loop(socketio, app, manager):
 
                     socketio.emit("alert", {
                         **alert.to_dict(),
-                        "id": attack.id,
+                        "id":              attack.id,
+                        "confidence":      int(blended_confidence * 100),
+                        "ml_score":        ml_result["anomaly_score"],
+                        "ml_flagged":      ml_result["is_anomaly"],
+                        "ml_model_ready":  ml_result["model_ready"],
+                    })
+
+                # Emit ML-only anomaly if no rule triggered but ML flagged it
+                if not alerts and ml_result["model_ready"] and ml_result["is_anomaly"] \
+                        and ml_result["anomaly_score"] > 0.7 and event.get("is_attack"):
+                    attack = Attack(
+                        source_ip    = event["source_ip"],
+                        attack_type  = "ML_ANOMALY",
+                        severity     = "medium",
+                        confidence   = ml_result["anomaly_score"],
+                        packet_count = event["packet_count"],
+                        status       = "active",
+                        is_simulated = True,
+                        raw_event    = event,
+                    )
+                    db.session.add(attack)
+                    db.session.commit()
+
+                    socketio.emit("alert", {
+                        "id":             attack.id,
+                        "source_ip":      event["source_ip"],
+                        "attack_type":    "ML_ANOMALY",
+                        "severity":       "medium",
+                        "confidence":     int(ml_result["anomaly_score"] * 100),
+                        "packet_count":   event["packet_count"],
+                        "status":         "active",
+                        "detected_at":    datetime.utcnow().isoformat(),
+                        "ml_score":       ml_result["anomaly_score"],
+                        "ml_flagged":     True,
+                        "ml_model_ready": True,
                     })
 
                 interval = max(1.0 / rate, 0.05)
@@ -138,14 +175,12 @@ def _run_loop(socketio, app, manager):
                 pass
             interval = 1.0
 
-        # Sleep using eventlet-friendly sleep
         try:
             import eventlet
             eventlet.sleep(interval)
         except ImportError:
             time.sleep(interval)
 
-    # Mark stopped in DB
     try:
         with app.app_context():
             cfg = SimulatorConfig.query.first()
@@ -157,12 +192,6 @@ def _run_loop(socketio, app, manager):
 
 
 class SimulatorManager:
-    """
-    Manages a single background simulation task.
-    Uses eventlet.spawn directly — works even before the first WS connection.
-    Falls back to daemon threading if eventlet is unavailable.
-    """
-
     def __init__(self):
         self._running  = False
         self._greenlet = None
@@ -196,5 +225,4 @@ class SimulatorManager:
             self._greenlet = None
 
 
-# Global singleton
 simulator_manager = SimulatorManager()

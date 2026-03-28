@@ -8,7 +8,7 @@
     'medium':   'background:#1c0a00;color:#fcd34d;border:1px solid #92400e',
     'low':      'background:#052e16;color:#86efac;border:1px solid #166534'
   } %}
-  <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;{{ styles.get(s, 'background:var(--surface2);color:var(--muted)') }}" >{{ (s or '—')|upper }}</span>
+  <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;{{ styles.get(s, 'background:var(--surface2);color:var(--muted)') }}">{{ (s or '—')|upper }}</span>
 {% endmacro %}
 
 {% macro status_badge(s) %}
@@ -24,7 +24,7 @@
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem">
   <div>
     <h2 style="font-size:1.5rem;font-weight:700;letter-spacing:-.5px">Live Threat Dashboard</h2>
-    <p class="text-muted" style="font-size:.85rem;margin-top:.2rem">Division 2 — Real-time Detection Engine &amp; WebSocket Alerts</p>
+    <p class="text-muted" style="font-size:.85rem;margin-top:.2rem">Division 3 — ML Detection + Security Hardening</p>
   </div>
   <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
     <span id="ws-indicator" style="font-size:.8rem;padding:4px 12px;border-radius:20px;background:#1c0a00;color:#f59e0b;border:1px solid #92400e">⬤ Connecting…</span>
@@ -64,16 +64,50 @@
   </div>
 </div>
 
+<!-- ML Status Panel -->
+<div class="card" style="padding:.9rem 1.5rem;margin-bottom:1rem;border-left:3px solid #22c55e">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+    <div style="display:flex;align-items:center;gap:.75rem">
+      <span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">🧠 ML Anomaly Detection</span>
+      <span id="ml-status-badge" style="font-size:.75rem;padding:2px 8px;border-radius:12px;background:#1c2a1c;color:#6b7280;border:1px solid #374151">
+        Training…
+      </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem;font-size:.8rem;color:var(--muted)">
+      <span>Samples: <strong id="ml-samples" style="color:var(--text)">0</strong> / 100</span>
+      <span>Anomalies: <strong id="ml-anomalies" style="color:#ef4444">0</strong></span>
+      <span>Rate: <strong id="ml-rate" style="color:#f59e0b">0%</strong></span>
+      {% if current_user.is_admin() %}
+      <button onclick="mlRetrain()" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.75rem">↺ Retrain</button>
+      {% endif %}
+    </div>
+  </div>
+  <div style="margin-top:.5rem;background:var(--surface2);border-radius:4px;height:4px;overflow:hidden">
+    <div id="ml-train-bar" style="width:0%;height:100%;background:#22c55e;transition:width .5s"></div>
+  </div>
+</div>
+
 <!-- Live ticker -->
 <div class="card" style="padding:.9rem 1.5rem;margin-bottom:1rem">
   <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem">
     <span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Live Traffic Feed</span>
     <span id="ticker-dot" style="width:7px;height:7px;border-radius:50%;background:#374151;display:inline-block;transition:background .15s"></span>
+    <span id="ml-live-flag" style="font-size:.7rem;padding:1px 6px;border-radius:8px;display:none"></span>
   </div>
   <div id="ticker" style="font-family:'Courier New',monospace;font-size:.82rem;color:var(--muted);height:22px;overflow:hidden;white-space:nowrap">
     Waiting for simulator…
   </div>
 </div>
+
+<!-- Export buttons -->
+{% if current_user.is_admin() %}
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">
+  <a href="/audit/export/csv" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">⬇ Export Audit Log (CSV)</a>
+  <a href="/audit/export/attacks/csv" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">⬇ Export Attacks (CSV)</a>
+  <a href="/api/metrics" target="_blank" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">📊 Metrics JSON</a>
+  <a href="/api/health" target="_blank" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">❤ Health Check</a>
+</div>
+{% endif %}
 
 <!-- Alert table -->
 <div class="card">
@@ -95,8 +129,8 @@
       <thead>
         <tr>
           <th>ID</th><th>Source IP</th><th>Attack Type</th>
-          <th>Severity</th><th>Confidence</th><th>Pkts/60s</th>
-          <th>Status</th><th>Time</th><th>Actions</th>
+          <th>Severity</th><th>Rule %</th><th>ML 🧠</th>
+          <th>Pkts</th><th>Status</th><th>Time</th><th>Actions</th>
         </tr>
       </thead>
       <tbody id="alert-tbody">
@@ -104,16 +138,21 @@
         <tr id="row-{{ a.id }}" data-status="{{ a.status }}" data-ip="{{ a.source_ip }}">
           <td class="text-muted" style="font-size:.8rem">{{ a.id }}</td>
           <td><code>{{ a.source_ip }}</code></td>
-          <td><span style="color:#93c5fd;font-size:.85rem">{{ a.attack_type or 'RATE_ANOMALY' }}</span></td>
+          <td>
+            <span style="color:{% if a.attack_type == 'ML_ANOMALY' %}#22c55e{% else %}#93c5fd{% endif %};font-size:.85rem">
+              {{ a.attack_type or 'RATE_ANOMALY' }}
+            </span>
+          </td>
           <td>{{ severity_badge(a.severity) }}</td>
           <td>
             <div style="display:flex;align-items:center;gap:.4rem">
-              <div style="width:56px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
+              <div style="width:45px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
                 <div style="width:{{ (a.confidence * 100)|int }}%;height:100%;background:{% if a.confidence > 0.75 %}var(--danger){% elif a.confidence > 0.5 %}#f59e0b{% else %}var(--primary){% endif %}"></div>
               </div>
               <span style="font-size:.78rem">{{ (a.confidence * 100)|int }}%</span>
             </div>
           </td>
+          <td><span style="font-size:.78rem;color:#6b7280">—</span></td>
           <td style="font-size:.82rem">{{ '{:,}'.format(a.packet_count or 0) }}</td>
           <td>{{ status_badge(a.status) }}</td>
           <td class="text-muted" style="font-size:.78rem">{{ a.detected_at.strftime('%H:%M:%S') }}</td>
@@ -133,7 +172,7 @@
         </tr>
         {% else %}
         <tr id="no-data-row">
-          <td colspan="9" style="text-align:center;padding:2.5rem;color:var(--muted)">
+          <td colspan="10" style="text-align:center;padding:2.5rem;color:var(--muted)">
             No alerts yet — click <strong>▶ Start Sim</strong> to generate traffic
           </td>
         </tr>
@@ -152,7 +191,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
 <script>
 let currentFilter = 'all';
-let simRunning = {{ 'true' if sim_running else 'false' | safe }};
+let simRunning = {{ (('true' if sim_running else 'false')) | safe }};
 let epsEvents = 0, epsLast = Date.now();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────
@@ -166,6 +205,19 @@ socket.on('sim_event', ev => {
   epsEvents++;
   const col = ev.is_attack ? '#ef4444' : '#6b7280';
   const tag = ev.is_attack ? `⚠ ${ev.type}` : '✓ normal';
+
+  // ML flag in live feed
+  const mlFlag = document.getElementById('ml-live-flag');
+  if (ev.ml_ready && ev.ml_anomaly) {
+    mlFlag.style.display = 'inline-block';
+    mlFlag.style.background = '#052e16';
+    mlFlag.style.color = '#22c55e';
+    mlFlag.style.border = '1px solid #166534';
+    mlFlag.textContent = '🧠 ML anomaly';
+  } else {
+    mlFlag.style.display = 'none';
+  }
+
   document.getElementById('ticker').innerHTML =
     `<span style="color:${col}">${tag}</span>  ·  ${ev.ip}  ·  ${(ev.packets||0).toLocaleString()} pkts  ·  ${(ev.timestamp||'').slice(11,19)}`;
   flash('ticker-dot', ev.is_attack ? '#ef4444' : '#22c55e');
@@ -181,7 +233,8 @@ socket.on('sim_event', ev => {
 socket.on('alert', a => {
   prependRow(a);
   refreshStats();
-  toast(`⚠ ${(a.severity||'').toUpperCase()}: ${a.source_ip} — ${a.attack_type||''}`,
+  const mlTag = a.ml_flagged ? ' 🧠' : '';
+  toast(`⚠ ${(a.severity||'').toUpperCase()}${mlTag}: ${a.source_ip} — ${a.attack_type||''}`,
     (a.severity === 'critical' || a.severity === 'high') ? '#ef4444' : '#f59e0b');
 });
 
@@ -200,8 +253,8 @@ socket.on('alert_ignored', d => {
   const row = document.getElementById(`row-${d.attack_id}`);
   if (row) {
     row.dataset.status = 'ignored';
-    row.cells[6].innerHTML = sBadge('ignored');
-    row.cells[8].innerHTML = '<span class="text-muted" style="font-size:.8rem">—</span>';
+    row.cells[7].innerHTML = sBadge('ignored');
+    row.cells[9].innerHTML = '<span class="text-muted" style="font-size:.8rem">—</span>';
   }
   refreshStats();
 });
@@ -224,15 +277,24 @@ function prependRow(a) {
   const conf = a.confidence || 0;
   const barColor = conf > 75 ? 'var(--danger)' : conf > 50 ? '#f59e0b' : 'var(--primary)';
   const ts = a.timestamp ? new Date(a.timestamp * 1000).toTimeString().slice(0,8) : '--:--:--';
+  const isML = a.attack_type === 'ML_ANOMALY';
+  const typeColor = isML ? '#22c55e' : '#93c5fd';
+
+  // ML score cell
+  const mlScore = a.ml_score != null
+    ? `<span style="font-size:.75rem;padding:1px 5px;border-radius:6px;background:${a.ml_flagged ? '#052e16' : 'transparent'};color:${a.ml_flagged ? '#22c55e' : '#6b7280'};border:1px solid ${a.ml_flagged ? '#166534' : '#374151'}">${Math.round((a.ml_score||0)*100)}%</span>`
+    : `<span style="font-size:.78rem;color:#6b7280">—</span>`;
+
   tr.innerHTML = `
     <td class="text-muted" style="font-size:.8rem">${a.id}</td>
     <td><code>${a.source_ip}</code></td>
-    <td><span style="color:#93c5fd;font-size:.85rem">${a.attack_type||'RATE_ANOMALY'}</span></td>
+    <td><span style="color:${typeColor};font-size:.85rem">${a.attack_type||'RATE_ANOMALY'}</span></td>
     <td>${sevBadge(a.severity)}</td>
     <td><div style="display:flex;align-items:center;gap:.4rem">
-      <div style="width:56px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
+      <div style="width:45px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
         <div style="width:${conf}%;height:100%;background:${barColor}"></div></div>
       <span style="font-size:.78rem">${conf}%</span></div></td>
+    <td>${mlScore}</td>
     <td style="font-size:.82rem">${(a.packet_count||0).toLocaleString()}</td>
     <td>${sBadge('active')}</td>
     <td class="text-muted" style="font-size:.78rem">${ts}</td>
@@ -278,6 +340,14 @@ async function toggleSimulator() {
   document.getElementById('simToggleBtn').disabled = false;
 }
 
+async function mlRetrain() {
+  const r = await fetch('/api/ml/retrain', {method:'POST'});
+  const d = await r.json();
+  if (d.success) toast('🧠 ML model retrained!', '#22c55e');
+  else toast('Not enough training data yet', '#f59e0b');
+  refreshMLStats();
+}
+
 function updateSimBtn() {
   const b = document.getElementById('simToggleBtn');
   if (!b) return;
@@ -308,8 +378,8 @@ function markBlocked(ip) {
   document.querySelectorAll(`#alert-tbody tr[data-ip="${ip}"]`).forEach(r => {
     if (r.dataset.status === 'active') {
       r.dataset.status = 'blocked';
-      r.cells[6].innerHTML = sBadge('blocked');
-      r.cells[8].innerHTML = `<button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
+      r.cells[7].innerHTML = sBadge('blocked');
+      r.cells[9].innerHTML = `<button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
         onclick="unblockIP('${ip}',this)">Unblock</button>`;
     }
   });
@@ -326,11 +396,38 @@ async function refreshStats() {
   } catch(e) {}
 }
 
+async function refreshMLStats() {
+  try {
+    const d = await (await fetch('/api/ml/stats')).json();
+    const badge = document.getElementById('ml-status-badge');
+    const bar   = document.getElementById('ml-train-bar');
+
+    if (d.model_ready) {
+      badge.textContent = '🧠 Model Ready';
+      badge.style.background = '#052e16';
+      badge.style.color = '#22c55e';
+      badge.style.borderColor = '#166534';
+      bar.style.width = '100%';
+    } else {
+      const pct = Math.min((d.training_samples / d.min_samples_needed) * 100, 99);
+      badge.textContent = `Training… ${d.training_samples}/${d.min_samples_needed}`;
+      badge.style.background = '#1c0a00';
+      badge.style.color = '#f59e0b';
+      badge.style.borderColor = '#92400e';
+      bar.style.width = pct + '%';
+    }
+
+    document.getElementById('ml-samples').textContent   = d.training_samples;
+    document.getElementById('ml-anomalies').textContent = d.total_anomalies;
+    document.getElementById('ml-rate').textContent      = Math.round(d.anomaly_rate * 100) + '%';
+  } catch(e) {}
+}
+
 function sevBadge(s) {
   const m = {critical:'background:#1a0505;color:#fca5a5;border:1px solid #7f1d1d',
              high:'background:#450a0a;color:#fca5a5;border:1px solid #991b1b',
              medium:'background:#1c0a00;color:#fcd34d;border:1px solid #92400e',
-             low:'background:#052e16;color:#86efac;border:1px solid #166534'}
+             low:'background:#052e16;color:#86efac;border:1px solid #166534'};
   return `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;${m[s]||'background:var(--surface2);color:var(--muted)'}">${(s||'—').toUpperCase()}</span>`;
 }
 
@@ -371,5 +468,7 @@ document.head.insertAdjacentHTML('beforeend',
 
 filterAlerts('all');
 setInterval(refreshStats, 10000);
+setInterval(refreshMLStats, 5000);
+refreshMLStats();
 </script>
 {% endblock %}
