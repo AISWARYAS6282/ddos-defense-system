@@ -31,6 +31,8 @@ services:
       DATABASE_URL: postgresql://ddosuser:ddospass@db:5432/ddosdefense
       SANDBOX_AGENT_URL: http://sandbox_agent:5001
       FLASK_ENV: development
+    ports:
+      - "5000:5000"
     networks:
       - internal
     volumes:
