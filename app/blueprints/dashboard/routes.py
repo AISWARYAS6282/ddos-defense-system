@@ -1,4 +1,6 @@
-from flask import render_template, redirect, url_for, flash, request, abort
+import csv
+import io
+from flask import render_template, redirect, url_for, flash, request, abort, Response
 from flask_login import login_required, current_user
 from . import dashboard_bp
 from ...extensions import db
@@ -10,7 +12,6 @@ from ...models.simulator_config import SimulatorConfig
 
 
 def admin_required(f):
-    """Decorator: restrict route to admin users only."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -23,18 +24,20 @@ def admin_required(f):
 @dashboard_bp.route("/")
 @login_required
 def index():
-    total_attacks = Attack.query.count()
-    total_blocked = BlockedIP.query.filter_by(is_active=True).count()
-    recent_attacks = Attack.query.order_by(Attack.detected_at.desc()).limit(10).all()
-    recent_logs = ResponseLog.query.order_by(ResponseLog.timestamp.desc()).limit(10).all()
-    sim_config = SimulatorConfig.query.first()
+    from ...simulator_manager import simulator_manager
+    total_attacks  = Attack.query.count()
+    active_alerts  = Attack.query.filter_by(status="active").count()
+    total_blocked  = BlockedIP.query.filter_by(is_active=True).count()
+    recent_attacks = Attack.query.order_by(Attack.detected_at.desc()).limit(50).all()
+    sim_config     = SimulatorConfig.query.first()
     return render_template(
         "dashboard/index.html",
         total_attacks=total_attacks,
+        active_alerts=active_alerts,
         total_blocked=total_blocked,
         recent_attacks=recent_attacks,
-        recent_logs=recent_logs,
         sim_config=sim_config,
+        sim_running=simulator_manager.running,
     )
 
 
@@ -51,9 +54,9 @@ def blocked_ips():
 def simulator():
     config = SimulatorConfig.query.first()
     if request.method == "POST":
-        config.attack_rate = float(request.form.get("attack_rate", 1.0))
+        config.attack_rate  = float(request.form.get("attack_rate", 1.0))
         config.attack_ratio = float(request.form.get("attack_ratio", 0.3))
-        config.updated_by = current_user.username
+        config.updated_by   = current_user.username
         db.session.commit()
         flash("Simulator config updated.", "success")
         return redirect(url_for("dashboard.simulator"))
@@ -72,45 +75,53 @@ def users():
 def forbidden(e):
     return render_template("dashboard/403.html"), 403
 
-import csv
-import io
-from flask import Response
 
+# ── Audit CSV Export ──────────────────────────────────────────────────────────
 
 @dashboard_bp.route("/audit/export/csv")
 @login_required
 def export_audit_csv():
     if not current_user.is_admin():
         abort(403)
-    from ...models.response_log import ResponseLog
-    logs = ResponseLog.query.order_by(ResponseLog.performed_at.desc()).all()
+    logs = ResponseLog.query.order_by(ResponseLog.id.desc()).all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID","Action","Target IP","Performed By","Status","Message","Timestamp"])
+    writer.writerow(["ID", "Action", "Target IP", "Performed By",
+                     "Status", "Message", "Timestamp"])
     for log in logs:
-        writer.writerow([log.id, log.action, log.target_ip, log.performed_by,
-                         log.status, log.message or "",
-                         log.performed_at.strftime("%Y-%m-%d %H:%M:%S UTC")])
+        # support both .timestamp and .performed_at field names
+        ts = getattr(log, "performed_at", None) or getattr(log, "timestamp", None)
+        ts_str = ts.strftime("%Y-%m-%d %H:%M:%S UTC") if ts else ""
+        writer.writerow([
+            log.id, log.action, log.target_ip, log.performed_by,
+            log.status, log.message or "", ts_str,
+        ])
     output.seek(0)
-    return Response(output.getvalue(), mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=audit_log.csv"})
+    return Response(
+        output.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit_log.csv"}
+    )
 
 
 @dashboard_bp.route("/audit/export/attacks/csv")
 @login_required
 def export_attacks_csv():
-    from ...models.attack import Attack
     attacks = Attack.query.order_by(Attack.detected_at.desc()).all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID","Source IP","Attack Type","Severity","Confidence %",
-                     "Packet Count","Status","Simulated","Detected At"])
+    writer.writerow(["ID", "Source IP", "Attack Type", "Severity",
+                     "Confidence %", "Packet Count", "Status",
+                     "Simulated", "Detected At"])
     for a in attacks:
-        writer.writerow([a.id, a.source_ip, a.attack_type or "RATE_ANOMALY",
-                         a.severity, f"{int((a.confidence or 0)*100)}%",
-                         a.packet_count or 0, a.status,
-                         "Yes" if a.is_simulated else "No",
-                         a.detected_at.strftime("%Y-%m-%d %H:%M:%S UTC")])
+        writer.writerow([
+            a.id, a.source_ip, a.attack_type or "RATE_ANOMALY",
+            a.severity, f"{int((a.confidence or 0) * 100)}%",
+            a.packet_count or 0, a.status,
+            "Yes" if a.is_simulated else "No",
+            a.detected_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        ])
     output.seek(0)
-    return Response(output.getvalue(), mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=attacks_log.csv"})
+    return Response(
+        output.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=attacks_log.csv"}
+    )
