@@ -1,3 +1,6 @@
+"""
+app/blueprints/dashboard/routes.py  —  Division 3 (COMPLETE + FIXED)
+"""
 import csv
 import io
 from flask import render_template, redirect, url_for, flash, request, abort, Response
@@ -89,12 +92,13 @@ def export_audit_csv():
     writer.writerow(["ID", "Action", "Target IP", "Performed By",
                      "Status", "Message", "Timestamp"])
     for log in logs:
-        # support both .timestamp and .performed_at field names
+        # Handle both field names: performed_at and timestamp
         ts = getattr(log, "performed_at", None) or getattr(log, "timestamp", None)
         ts_str = ts.strftime("%Y-%m-%d %H:%M:%S UTC") if ts else ""
         writer.writerow([
-            log.id, log.action, log.target_ip, log.performed_by,
-            log.status, log.message or "", ts_str,
+            log.id, log.action, log.target_ip,
+            log.performed_by, log.status,
+            log.message or "", ts_str,
         ])
     output.seek(0)
     return Response(

@@ -1,8 +1,7 @@
 """
-app/blueprints/api/routes.py  —  Division 3
-All API endpoints with rate limiting + ML status endpoint.
+app/blueprints/api/routes.py  —  Division 3  (COMPLETE + FIXED)
 """
-import re
+import time
 from flask import jsonify, request, current_app
 from flask_login import login_required, current_user
 import requests as http_requests
@@ -15,7 +14,8 @@ from ...models.attack import Attack
 from ...security import limiter, is_valid_ip, sanitize_reason
 from datetime import datetime
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+_start_time = time.time()
+
 
 def _call_sandbox(action, ip):
     agent_url = current_app.config.get("SANDBOX_AGENT_URL", "http://sandbox_agent:5001")
@@ -31,16 +31,62 @@ def _call_sandbox(action, ip):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+# ── Health & Metrics ──────────────────────────────────────────────────────────
+
+@api_bp.route("/health")
+def health():
+    try:
+        db.session.execute(db.text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return jsonify({
+        "status":         "healthy" if db_ok else "degraded",
+        "database":       "up" if db_ok else "down",
+        "uptime_seconds": round(time.time() - _start_time),
+    }), (200 if db_ok else 503)
+
+
+@api_bp.route("/metrics")
+def metrics():
+    from ...simulator_manager import simulator_manager
+    try:
+        from sqlalchemy import func
+        top_ips = (
+            db.session.query(Attack.source_ip, func.count(Attack.id).label("c"))
+            .group_by(Attack.source_ip)
+            .order_by(func.count(Attack.id).desc())
+            .limit(5).all()
+        )
+        return jsonify({
+            "uptime_seconds":    round(time.time() - _start_time),
+            "simulator_running": simulator_manager.running,
+            "attacks": {
+                "total":   Attack.query.count(),
+                "active":  Attack.query.filter_by(status="active").count(),
+                "blocked": Attack.query.filter_by(status="blocked").count(),
+                "ignored": Attack.query.filter_by(status="ignored").count(),
+            },
+            "blocked_ips": BlockedIP.query.filter_by(is_active=True).count(),
+            "severity_breakdown": {
+                s: Attack.query.filter_by(severity=s).count()
+                for s in ("low", "medium", "high", "critical")
+            },
+            "top_attacker_ips": [{"ip": ip, "count": c} for ip, c in top_ips],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Status ────────────────────────────────────────────────────────────────────
 
 @api_bp.route("/status")
 def status():
     from ...simulator_manager import simulator_manager
-    return jsonify({
-        "status": "ok",
-        "division": 3,
-        "simulator_running": simulator_manager.running,
-    })
+    return jsonify({"status": "ok", "division": 3,
+                    "simulator_running": simulator_manager.running})
+
 
 # ── Simulator ─────────────────────────────────────────────────────────────────
 
@@ -88,18 +134,19 @@ def sim_config():
         })
     data = request.get_json() or {}
     if cfg:
-        if "attack_rate" in data:
+        if "attack_rate"  in data:
             cfg.attack_rate  = max(0.1, min(float(data["attack_rate"]),  10.0))
         if "attack_ratio" in data:
             cfg.attack_ratio = max(0.0, min(float(data["attack_ratio"]), 1.0))
         db.session.commit()
     return jsonify({"success": True})
 
+
 # ── Block / Unblock ───────────────────────────────────────────────────────────
 
 @api_bp.route("/block", methods=["POST"])
 @login_required
-@limiter.limit("10 per minute")
+@limiter.limit("20 per minute")
 def block_ip():
     data   = request.get_json() or {}
     ip     = data.get("ip", "").strip()
@@ -110,18 +157,25 @@ def block_ip():
 
     existing = BlockedIP.query.filter_by(ip_address=ip).first()
     if existing and existing.is_active:
-        return jsonify({"error": "IP already blocked"}), 409
+        # Already blocked — just emit event so UI updates
+        socketio.emit("ip_blocked", {
+            "ip": ip, "reason": existing.reason,
+            "blocked_by": existing.blocked_by,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        return jsonify({"success": True, "ip": ip, "note": "already blocked"})
 
     sandbox_resp = _call_sandbox("BLOCK", ip)
 
     if existing:
-        existing.is_active   = True
-        existing.reason      = reason
-        existing.blocked_by  = current_user.username
-        existing.blocked_at  = datetime.utcnow()
+        existing.is_active  = True
+        existing.reason     = reason
+        existing.blocked_by = current_user.username
+        existing.blocked_at = datetime.utcnow()
     else:
         db.session.add(BlockedIP(
-            ip_address=ip, reason=reason, blocked_by=current_user.username
+            ip_address=ip, reason=reason,
+            blocked_by=current_user.username
         ))
 
     Attack.query.filter_by(source_ip=ip, status="active").update({"status": "blocked"})
@@ -136,17 +190,15 @@ def block_ip():
     db.session.commit()
 
     socketio.emit("ip_blocked", {
-        "ip":         ip,
-        "reason":     reason,
+        "ip": ip, "reason": reason,
         "blocked_by": current_user.username,
-        "timestamp":  datetime.utcnow().isoformat(),
+        "timestamp": datetime.utcnow().isoformat(),
     })
-    return jsonify({"success": True, "ip": ip, "sandbox": sandbox_resp})
+    return jsonify({"success": True, "ip": ip})
 
 
 @api_bp.route("/unblock", methods=["POST"])
 @login_required
-@limiter.limit("10 per minute")
 def unblock_ip():
     data = request.get_json() or {}
     ip   = data.get("ip", "").strip()
@@ -158,7 +210,7 @@ def unblock_ip():
     if not block:
         return jsonify({"error": "IP not currently blocked"}), 404
 
-    sandbox_resp  = _call_sandbox("UNBLOCK", ip)
+    sandbox_resp    = _call_sandbox("UNBLOCK", ip)
     block.is_active = False
 
     db.session.add(ResponseLog(
@@ -171,11 +223,11 @@ def unblock_ip():
     db.session.commit()
 
     socketio.emit("ip_unblocked", {
-        "ip":           ip,
-        "unblocked_by": current_user.username,
-        "timestamp":    datetime.utcnow().isoformat(),
+        "ip": ip, "unblocked_by": current_user.username,
+        "timestamp": datetime.utcnow().isoformat(),
     })
     return jsonify({"success": True, "ip": ip})
+
 
 # ── Ignore ────────────────────────────────────────────────────────────────────
 
@@ -186,23 +238,21 @@ def ignore_alert():
     attack_id = data.get("attack_id")
     if not attack_id:
         return jsonify({"error": "attack_id required"}), 400
-
     attack = Attack.query.get(attack_id)
     if not attack:
         return jsonify({"error": "Not found"}), 404
     if attack.status != "active":
         return jsonify({"error": f"Already {attack.status}"}), 409
-
     attack.status   = "ignored"
     attack.resolved = True
     db.session.commit()
-
     socketio.emit("alert_ignored", {
         "attack_id":  attack_id,
         "ip":         attack.source_ip,
         "ignored_by": current_user.username,
     })
     return jsonify({"success": True, "attack_id": attack_id})
+
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
@@ -243,20 +293,24 @@ def list_blocked():
         "blocked_at": b.blocked_at.isoformat(),
     } for b in ips])
 
+
 # ── ML ────────────────────────────────────────────────────────────────────────
 
 @api_bp.route("/ml/stats")
 @login_required
 def ml_stats():
-    """Returns ML model status and statistics."""
-    from ...ml.isolation_forest import anomaly_detector
-    return jsonify(anomaly_detector.get_stats())
+    try:
+        from ...ml.isolation_forest import anomaly_detector
+        return jsonify(anomaly_detector.get_stats())
+    except Exception as e:
+        return jsonify({"error": str(e), "model_ready": False,
+                        "training_samples": 0, "min_samples_needed": 100,
+                        "total_anomalies": 0, "anomaly_rate": 0})
 
 
 @api_bp.route("/ml/retrain", methods=["POST"])
 @login_required
 def ml_retrain():
-    """Force retrain the ML model."""
     if not current_user.is_admin():
         return jsonify({"error": "Admin only"}), 403
     from ...ml.isolation_forest import anomaly_detector
@@ -267,7 +321,6 @@ def ml_retrain():
 @api_bp.route("/ml/reset", methods=["POST"])
 @login_required
 def ml_reset():
-    """Reset the ML model."""
     if not current_user.is_admin():
         return jsonify({"error": "Admin only"}), 403
     from ...ml.isolation_forest import anomaly_detector
