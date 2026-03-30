@@ -341,10 +341,15 @@ async function toggleSimulator() {
 }
 
 async function mlRetrain() {
+  const btn = event.target;
+  btn.textContent = '…';
+  btn.disabled = true;
   const r = await fetch('/api/ml/retrain', {method:'POST'});
   const d = await r.json();
+  btn.textContent = '↺ Retrain';
+  btn.disabled = false;
   if (d.success) toast('🧠 ML model retrained!', '#22c55e');
-  else toast('Not enough training data yet', '#f59e0b');
+  else toast('Need more training data', '#f59e0b');
   refreshMLStats();
 }
 
@@ -401,22 +406,22 @@ async function refreshMLStats() {
     const d = await (await fetch('/api/ml/stats')).json();
     const badge = document.getElementById('ml-status-badge');
     const bar   = document.getElementById('ml-train-bar');
-
     if (d.model_ready) {
       badge.textContent = '🧠 Model Ready';
       badge.style.background = '#052e16';
       badge.style.color = '#22c55e';
       badge.style.borderColor = '#166534';
       bar.style.width = '100%';
+      bar.style.background = '#22c55e';
     } else {
       const pct = Math.min((d.training_samples / d.min_samples_needed) * 100, 99);
-      badge.textContent = `Training… ${d.training_samples}/${d.min_samples_needed}`;
+      badge.textContent = 'Training… ' + d.training_samples + '/' + d.min_samples_needed;
       badge.style.background = '#1c0a00';
       badge.style.color = '#f59e0b';
       badge.style.borderColor = '#92400e';
       bar.style.width = pct + '%';
+      bar.style.background = '#f59e0b';
     }
-
     document.getElementById('ml-samples').textContent   = d.training_samples;
     document.getElementById('ml-anomalies').textContent = d.total_anomalies;
     document.getElementById('ml-rate').textContent      = Math.round(d.anomaly_rate * 100) + '%';
