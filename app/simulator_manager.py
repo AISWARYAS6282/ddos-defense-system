@@ -103,15 +103,17 @@ def _run_loop(socketio, app, manager):
                 ml = _try_ml_score(event)
 
                 # Emit to live ticker
+                # Emit to live ticker
+                # Emit to live ticker
                 socketio.emit("sim_event", {
                     "ip":        event["source_ip"],
                     "is_attack": event["is_attack"],
                     "type":      event.get("attack_type"),
                     "packets":   event["packet_count"],
                     "timestamp": event["timestamp"],
-                    "ml_anomaly": ml["is_anomaly"],
-                    "ml_score":   ml["anomaly_score"],
-                    "ml_ready":   ml["model_ready"],
+                    "ml_anomaly": bool(ml["is_anomaly"]),
+                    "ml_score":   float(ml["anomaly_score"]),
+                    "ml_ready":   bool(ml["model_ready"]),
                 })
 
                 # Rule-based detection
@@ -140,8 +142,8 @@ def _run_loop(socketio, app, manager):
                         **alert.to_dict(),
                         "id":         attack.id,
                         "confidence": int(confidence * 100),
-                        "ml_score":   ml["anomaly_score"],
-                        "ml_flagged": ml["is_anomaly"],
+                        "ml_score":   float(ml["anomaly_score"]),
+                        "ml_flagged": bool(ml["is_anomaly"]),
                     })
 
                 interval = max(1.0 / rate, 0.05)
