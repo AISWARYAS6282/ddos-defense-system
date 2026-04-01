@@ -8,7 +8,7 @@
     'medium':   'background:#1c0a00;color:#fcd34d;border:1px solid #92400e',
     'low':      'background:#052e16;color:#86efac;border:1px solid #166534'
   } %}
-  <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;{{ styles.get(s, 'background:var(--surface2);color:var(--muted)') }}">{{ (s or '—')|upper }}</span>
+  <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;{{ styles.get(s,'background:var(--surface2);color:var(--muted)') }}">{{ (s or '—')|upper }}</span>
 {% endmacro %}
 
 {% macro status_badge(s) %}
@@ -27,6 +27,12 @@
     <p class="text-muted" style="font-size:.85rem;margin-top:.2rem">Division 3 — ML Detection + Security Hardening</p>
   </div>
   <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+    <!-- Dark/Light Mode Toggle -->
+    <button onclick="toggleTheme()" id="themeBtn"
+      style="background:var(--surface2);border:1px solid var(--border);color:var(--text);
+             padding:4px 12px;border-radius:20px;font-size:.8rem;cursor:pointer">
+      🌙 Dark
+    </button>
     <span id="ws-indicator" style="font-size:.8rem;padding:4px 12px;border-radius:20px;background:#1c0a00;color:#f59e0b;border:1px solid #92400e">⬤ Connecting…</span>
     {% if current_user.is_admin() %}
     <button id="simToggleBtn" onclick="toggleSimulator()"
@@ -64,14 +70,32 @@
   </div>
 </div>
 
-<!-- ML Status Panel -->
+<!-- Charts Row -->
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:1rem">
+  <!-- Real-time Attack Graph -->
+  <div class="card" style="padding:1rem 1.5rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+      <span style="font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📈 Attacks / Minute</span>
+      <span style="font-size:.75rem;color:var(--muted)">Last 60 seconds</span>
+    </div>
+    <canvas id="attackChart" height="80"></canvas>
+  </div>
+
+  <!-- Attack Type Pie Chart -->
+  <div class="card" style="padding:1rem 1.5rem">
+    <div style="margin-bottom:.75rem">
+      <span style="font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🥧 Attack Types</span>
+    </div>
+    <canvas id="typeChart" height="120"></canvas>
+  </div>
+</div>
+
+<!-- ML Panel -->
 <div class="card" style="padding:.9rem 1.5rem;margin-bottom:1rem;border-left:3px solid #22c55e">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
     <div style="display:flex;align-items:center;gap:.75rem">
       <span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">🧠 ML Anomaly Detection</span>
-      <span id="ml-status-badge" style="font-size:.75rem;padding:2px 8px;border-radius:12px;background:#1c2a1c;color:#6b7280;border:1px solid #374151">
-        Training…
-      </span>
+      <span id="ml-status-badge" style="font-size:.75rem;padding:2px 8px;border-radius:12px;background:#1c2a1c;color:#6b7280;border:1px solid #374151">Training…</span>
     </div>
     <div style="display:flex;align-items:center;gap:1rem;font-size:.8rem;color:var(--muted)">
       <span>Samples: <strong id="ml-samples" style="color:var(--text)">0</strong> / 100</span>
@@ -102,10 +126,10 @@
 <!-- Export buttons -->
 {% if current_user.is_admin() %}
 <div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">
-  <a href="/audit/export/csv" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">⬇ Export Audit Log (CSV)</a>
-  <a href="/audit/export/attacks/csv" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">⬇ Export Attacks (CSV)</a>
-  <a href="/api/metrics" target="_blank" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">📊 Metrics JSON</a>
-  <a href="/api/health" target="_blank" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">❤ Health Check</a>
+  <a href="/audit/export/csv" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">⬇ Export Audit Log</a>
+  <a href="/audit/export/attacks/csv" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">⬇ Export Attacks</a>
+  <a href="/api/metrics" target="_blank" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">📊 Metrics</a>
+  <a href="/api/health" target="_blank" class="btn btn-ghost" style="font-size:.8rem;padding:.35rem .9rem">❤ Health</a>
 </div>
 {% endif %}
 
@@ -117,7 +141,7 @@
       <span id="alert-count-badge" style="background:var(--danger);color:#fff;padding:2px 9px;border-radius:12px;font-size:.75rem;font-weight:600">{{ active_alerts }}</span>
     </div>
     <div style="display:flex;gap:.4rem">
-      {% for f in ['all', 'active', 'blocked', 'ignored'] %}
+      {% for f in ['all','active','blocked','ignored'] %}
       <button onclick="filterAlerts('{{ f }}')" class="btn btn-ghost filter-btn {{ 'active' if f == 'all' else '' }}" data-f="{{ f }}"
         style="padding:.3rem .8rem;font-size:.78rem">{{ f|title }}</button>
       {% endfor %}
@@ -128,25 +152,23 @@
     <table id="alert-table">
       <thead>
         <tr>
-          <th>ID</th><th>Source IP</th><th>Attack Type</th>
-          <th>Severity</th><th>Rule %</th><th>ML 🧠</th>
-          <th>Pkts</th><th>Status</th><th>Time</th><th>Actions</th>
+          <th>ID</th><th>Flag</th><th>Source IP</th><th>Country</th>
+          <th>Attack Type</th><th>Severity</th><th>Rule %</th>
+          <th>ML 🧠</th><th>Pkts</th><th>Status</th><th>Time</th><th>Actions</th>
         </tr>
       </thead>
       <tbody id="alert-tbody">
         {% for a in recent_attacks %}
         <tr id="row-{{ a.id }}" data-status="{{ a.status }}" data-ip="{{ a.source_ip }}">
           <td class="text-muted" style="font-size:.8rem">{{ a.id }}</td>
+          <td style="font-size:1.1rem">🌍</td>
           <td><code>{{ a.source_ip }}</code></td>
-          <td>
-            <span style="color:{% if a.attack_type == 'ML_ANOMALY' %}#22c55e{% else %}#93c5fd{% endif %};font-size:.85rem">
-              {{ a.attack_type or 'RATE_ANOMALY' }}
-            </span>
-          </td>
+          <td style="font-size:.8rem;color:var(--muted)">—</td>
+          <td><span style="color:#93c5fd;font-size:.85rem">{{ a.attack_type or 'RATE_ANOMALY' }}</span></td>
           <td>{{ severity_badge(a.severity) }}</td>
           <td>
             <div style="display:flex;align-items:center;gap:.4rem">
-              <div style="width:45px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
+              <div style="width:40px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
                 <div style="width:{{ (a.confidence * 100)|int }}%;height:100%;background:{% if a.confidence > 0.75 %}var(--danger){% elif a.confidence > 0.5 %}#f59e0b{% else %}var(--primary){% endif %}"></div>
               </div>
               <span style="font-size:.78rem">{{ (a.confidence * 100)|int }}%</span>
@@ -172,7 +194,7 @@
         </tr>
         {% else %}
         <tr id="no-data-row">
-          <td colspan="10" style="text-align:center;padding:2.5rem;color:var(--muted)">
+          <td colspan="12" style="text-align:center;padding:2.5rem;color:var(--muted)">
             No alerts yet — click <strong>▶ Start Sim</strong> to generate traffic
           </td>
         </tr>
@@ -189,12 +211,126 @@
   z-index:9999;max-width:340px;pointer-events:none"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script>
-let currentFilter = 'all';
-let simRunning = {{ (('true' if sim_running else 'false')) | safe }};
-let epsEvents = 0, epsLast = Date.now();
+// ─── Theme ────────────────────────────────────────────────────────────────
+let darkMode = true;
+function toggleTheme() {
+  darkMode = !darkMode;
+  const r = document.documentElement.style;
+  if (!darkMode) {
+    r.setProperty('--bg','#f8fafc');
+    r.setProperty('--surface','#ffffff');
+    r.setProperty('--surface2','#f1f5f9');
+    r.setProperty('--border','#e2e8f0');
+    r.setProperty('--text','#0f172a');
+    r.setProperty('--muted','#64748b');
+    document.getElementById('themeBtn').textContent = '☀️ Light';
+  } else {
+    r.setProperty('--bg','#0a0e1a');
+    r.setProperty('--surface','#111827');
+    r.setProperty('--surface2','#1f2937');
+    r.setProperty('--border','#374151');
+    r.setProperty('--text','#f3f4f6');
+    r.setProperty('--muted','#9ca3af');
+    document.getElementById('themeBtn').textContent = '🌙 Dark';
+  }
+}
+
+// ─── Attack Chart Setup ───────────────────────────────────────────────────
+const MAX_POINTS = 30;
+const chartLabels = Array(MAX_POINTS).fill('');
+const chartData   = Array(MAX_POINTS).fill(0);
+let   tickCount   = 0, attackThisSec = 0;
+
+const attackChart = new Chart(document.getElementById('attackChart'), {
+  type: 'line',
+  data: {
+    labels: chartLabels,
+    datasets: [{
+      label: 'Attacks/min',
+      data: chartData,
+      borderColor: '#ef4444',
+      backgroundColor: 'rgba(239,68,68,0.1)',
+      borderWidth: 2,
+      pointRadius: 0,
+      fill: true,
+      tension: 0.4,
+    }]
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { display: false },
+      y: {
+        min: 0,
+        grid: { color: 'rgba(255,255,255,0.05)' },
+        ticks: { color: '#6b7280', font: { size: 10 } }
+      }
+    }
+  }
+});
+
+// ─── Pie Chart Setup ──────────────────────────────────────────────────────
+const typeColors = {
+  SYN_FLOOD:        '#ef4444',
+  UDP_FLOOD:        '#f59e0b',
+  HTTP_FLOOD:       '#3b82f6',
+  ICMP_FLOOD:       '#8b5cf6',
+  DNS_AMPLIFICATION:'#22c55e',
+  ML_ANOMALY:       '#06b6d4',
+  RATE_ANOMALY:     '#ec4899',
+};
+const typeCounts = {};
+
+const typeChart = new Chart(document.getElementById('typeChart'), {
+  type: 'doughnut',
+  data: {
+    labels: [],
+    datasets: [{
+      data: [],
+      backgroundColor: [],
+      borderWidth: 1,
+      borderColor: '#1f2937',
+    }]
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: { color: '#9ca3af', font: { size: 10 }, boxWidth: 12 }
+      }
+    }
+  }
+});
+
+function updateTypeChart(attackType) {
+  const t = attackType || 'RATE_ANOMALY';
+  typeCounts[t] = (typeCounts[t] || 0) + 1;
+  typeChart.data.labels          = Object.keys(typeCounts);
+  typeChart.data.datasets[0].data = Object.values(typeCounts);
+  typeChart.data.datasets[0].backgroundColor =
+    Object.keys(typeCounts).map(k => typeColors[k] || '#6b7280');
+  typeChart.update();
+}
+
+// Update attack chart every second
+setInterval(() => {
+  chartData.shift(); chartData.push(attackThisSec * 60);
+  chartLabels.shift(); chartLabels.push('');
+  attackThisSec = 0;
+  attackChart.update();
+}, 1000);
 
 // ─── WebSocket ────────────────────────────────────────────────────────────
+let currentFilter = 'all';
+let simRunning    = {{ (('true' if sim_running else 'false')) | safe }};
+let epsEvents = 0, epsLast = Date.now();
+
 const socket = io({ transports: ['websocket','polling'] });
 
 socket.on('connect',       () => wsStatus('connected'));
@@ -203,23 +339,23 @@ socket.on('connect_error', () => wsStatus('error'));
 
 socket.on('sim_event', ev => {
   epsEvents++;
+  if (ev.is_attack) attackThisSec++;
+
   const col = ev.is_attack ? '#ef4444' : '#6b7280';
   const tag = ev.is_attack ? `⚠ ${ev.type}` : '✓ normal';
+  const geo = ev.flag ? `${ev.flag} ` : '';
 
-  // ML flag in live feed
   const mlFlag = document.getElementById('ml-live-flag');
   if (ev.ml_ready && ev.ml_anomaly) {
     mlFlag.style.display = 'inline-block';
-    mlFlag.style.background = '#052e16';
-    mlFlag.style.color = '#22c55e';
-    mlFlag.style.border = '1px solid #166534';
+    mlFlag.style.cssText = 'display:inline-block;font-size:.7rem;padding:1px 6px;border-radius:8px;background:#052e16;color:#22c55e;border:1px solid #166534';
     mlFlag.textContent = '🧠 ML anomaly';
   } else {
     mlFlag.style.display = 'none';
   }
 
   document.getElementById('ticker').innerHTML =
-    `<span style="color:${col}">${tag}</span>  ·  ${ev.ip}  ·  ${(ev.packets||0).toLocaleString()} pkts  ·  ${(ev.timestamp||'').slice(11,19)}`;
+    `<span style="color:${col}">${tag}</span>  ·  ${geo}${ev.ip}  ·  ${(ev.packets||0).toLocaleString()} pkts  ·  ${(ev.timestamp||'').slice(11,19)}`;
   flash('ticker-dot', ev.is_attack ? '#ef4444' : '#22c55e');
 
   const now = Date.now();
@@ -232,16 +368,24 @@ socket.on('sim_event', ev => {
 
 socket.on('alert', a => {
   prependRow(a);
+  updateTypeChart(a.attack_type);
   refreshStats();
   const mlTag = a.ml_flagged ? ' 🧠' : '';
-  toast(`⚠ ${(a.severity||'').toUpperCase()}${mlTag}: ${a.source_ip} — ${a.attack_type||''}`,
-    (a.severity === 'critical' || a.severity === 'high') ? '#ef4444' : '#f59e0b');
+  toast(
+    `⚠ ${(a.severity||'').toUpperCase()}${mlTag}: ${a.flag||'🌍'} ${a.source_ip} — ${a.attack_type||''}`,
+    (a.severity === 'critical' || a.severity === 'high') ? '#ef4444' : '#f59e0b'
+  );
 });
 
 socket.on('ip_blocked', d => {
   markBlocked(d.ip);
   refreshStats();
-  toast(`🔒 ${d.ip} blocked by ${d.blocked_by}`, '#22c55e');
+  const auto = d.auto ? '🤖 Auto-blocked' : '🔒 Blocked';
+  toast(`${auto}: ${d.ip}`, '#22c55e');
+});
+
+socket.on('auto_blocked', d => {
+  toast(`🤖 Auto-blocked ${d.flag||''} ${d.ip} — 3+ alerts in 5 min`, '#ef4444');
 });
 
 socket.on('ip_unblocked', d => {
@@ -253,8 +397,8 @@ socket.on('alert_ignored', d => {
   const row = document.getElementById(`row-${d.attack_id}`);
   if (row) {
     row.dataset.status = 'ignored';
-    row.cells[7].innerHTML = sBadge('ignored');
-    row.cells[9].innerHTML = '<span class="text-muted" style="font-size:.8rem">—</span>';
+    row.cells[9].innerHTML  = sBadge('ignored');
+    row.cells[11].innerHTML = '<span class="text-muted" style="font-size:.8rem">—</span>';
   }
   refreshStats();
 });
@@ -271,27 +415,29 @@ socket.on('sim_status', d => {
 function prependRow(a) {
   document.getElementById('no-data-row')?.remove();
   const tbody = document.getElementById('alert-tbody');
-  const tr = document.createElement('tr');
+  const tr    = document.createElement('tr');
   tr.id = `row-${a.id}`; tr.dataset.status = 'active'; tr.dataset.ip = a.source_ip;
   tr.style.cssText = 'animation:fadeIn .35s ease';
-  const conf = a.confidence || 0;
+  const conf     = a.confidence || 0;
   const barColor = conf > 75 ? 'var(--danger)' : conf > 50 ? '#f59e0b' : 'var(--primary)';
-  const ts = a.timestamp ? new Date(a.timestamp * 1000).toTimeString().slice(0,8) : '--:--:--';
-  const isML = a.attack_type === 'ML_ANOMALY';
-  const typeColor = isML ? '#22c55e' : '#93c5fd';
-
-  // ML score cell
-  const mlScore = a.ml_score != null
-    ? `<span style="font-size:.75rem;padding:1px 5px;border-radius:6px;background:${a.ml_flagged ? '#052e16' : 'transparent'};color:${a.ml_flagged ? '#22c55e' : '#6b7280'};border:1px solid ${a.ml_flagged ? '#166534' : '#374151'}">${Math.round((a.ml_score||0)*100)}%</span>`
+  const ts       = a.timestamp ? new Date(a.timestamp * 1000).toTimeString().slice(0,8) : '--:--:--';
+  const isML     = a.attack_type === 'ML_ANOMALY';
+  const typeCol  = isML ? '#22c55e' : '#93c5fd';
+  const mlScore  = a.ml_score != null
+    ? `<span style="font-size:.75rem;padding:1px 5px;border-radius:6px;background:${a.ml_flagged?'#052e16':'transparent'};color:${a.ml_flagged?'#22c55e':'#6b7280'};border:1px solid ${a.ml_flagged?'#166534':'#374151'}">${Math.round((a.ml_score||0)*100)}%</span>`
     : `<span style="font-size:.78rem;color:#6b7280">—</span>`;
+  const flag    = a.flag    || '🌍';
+  const country = a.country || '—';
 
   tr.innerHTML = `
     <td class="text-muted" style="font-size:.8rem">${a.id}</td>
+    <td style="font-size:1.1rem">${flag}</td>
     <td><code>${a.source_ip}</code></td>
-    <td><span style="color:${typeColor};font-size:.85rem">${a.attack_type||'RATE_ANOMALY'}</span></td>
+    <td style="font-size:.8rem;color:var(--muted)">${country}</td>
+    <td><span style="color:${typeCol};font-size:.85rem">${a.attack_type||'RATE_ANOMALY'}</span></td>
     <td>${sevBadge(a.severity)}</td>
     <td><div style="display:flex;align-items:center;gap:.4rem">
-      <div style="width:45px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
+      <div style="width:40px;background:var(--surface2);border-radius:4px;height:5px;overflow:hidden">
         <div style="width:${conf}%;height:100%;background:${barColor}"></div></div>
       <span style="font-size:.78rem">${conf}%</span></div></td>
     <td>${mlScore}</td>
@@ -319,40 +465,31 @@ async function blockIP(ip, id, btn) {
     body: JSON.stringify({ip, reason:'Dashboard block'}) });
   if (!r.ok) { const d=await r.json(); toast(`✗ ${d.error}`,'#ef4444'); btn.disabled=false; btn.textContent='Block'; }
 }
-
 async function unblockIP(ip, btn) {
   btn.disabled = true; btn.textContent = '…';
   const r = await fetch('/api/unblock', { method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip}) });
   if (!r.ok) { const d=await r.json(); toast(`✗ ${d.error}`,'#ef4444'); btn.disabled=false; btn.textContent='Unblock'; }
 }
-
 async function ignoreAlert(id, btn) {
   btn.disabled = true; btn.textContent = '…';
   const r = await fetch('/api/ignore', { method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({attack_id:id}) });
   if (!r.ok) { const d=await r.json(); toast(`✗ ${d.error}`,'#ef4444'); btn.disabled=false; btn.textContent='Ignore'; }
 }
-
 async function toggleSimulator() {
   document.getElementById('simToggleBtn').disabled = true;
   await fetch(simRunning ? '/api/simulator/stop' : '/api/simulator/start', {method:'POST'});
   document.getElementById('simToggleBtn').disabled = false;
 }
-
 async function mlRetrain() {
-  const btn = event.target;
-  btn.textContent = '…';
-  btn.disabled = true;
+  const btn = event.target; btn.textContent = '…'; btn.disabled = true;
   const r = await fetch('/api/ml/retrain', {method:'POST'});
   const d = await r.json();
-  btn.textContent = '↺ Retrain';
-  btn.disabled = false;
-  if (d.success) toast('🧠 ML model retrained!', '#22c55e');
-  else toast('Need more training data', '#f59e0b');
+  btn.textContent = '↺ Retrain'; btn.disabled = false;
+  toast(d.success ? '🧠 ML model retrained!' : 'Need more data', d.success ? '#22c55e' : '#f59e0b');
   refreshMLStats();
 }
-
 function updateSimBtn() {
   const b = document.getElementById('simToggleBtn');
   if (!b) return;
@@ -383,14 +520,13 @@ function markBlocked(ip) {
   document.querySelectorAll(`#alert-tbody tr[data-ip="${ip}"]`).forEach(r => {
     if (r.dataset.status === 'active') {
       r.dataset.status = 'blocked';
-      r.cells[7].innerHTML = sBadge('blocked');
-      r.cells[9].innerHTML = `<button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
+      r.cells[9].innerHTML  = sBadge('blocked');
+      r.cells[11].innerHTML = `<button class="btn btn-ghost" style="padding:.22rem .65rem;font-size:.75rem"
         onclick="unblockIP('${ip}',this)">Unblock</button>`;
     }
   });
   applyFilter();
 }
-
 async function refreshStats() {
   try {
     const d = await (await fetch('/api/stats')).json();
@@ -400,7 +536,6 @@ async function refreshStats() {
     document.getElementById('alert-count-badge').textContent = d.active_alerts;
   } catch(e) {}
 }
-
 async function refreshMLStats() {
   try {
     const d = await (await fetch('/api/ml/stats')).json();
@@ -408,26 +543,19 @@ async function refreshMLStats() {
     const bar   = document.getElementById('ml-train-bar');
     if (d.model_ready) {
       badge.textContent = '🧠 Model Ready';
-      badge.style.background = '#052e16';
-      badge.style.color = '#22c55e';
-      badge.style.borderColor = '#166534';
-      bar.style.width = '100%';
-      bar.style.background = '#22c55e';
+      badge.style.cssText = 'font-size:.75rem;padding:2px 8px;border-radius:12px;background:#052e16;color:#22c55e;border:1px solid #166534';
+      bar.style.width = '100%'; bar.style.background = '#22c55e';
     } else {
       const pct = Math.min((d.training_samples / d.min_samples_needed) * 100, 99);
-      badge.textContent = 'Training… ' + d.training_samples + '/' + d.min_samples_needed;
-      badge.style.background = '#1c0a00';
-      badge.style.color = '#f59e0b';
-      badge.style.borderColor = '#92400e';
-      bar.style.width = pct + '%';
-      bar.style.background = '#f59e0b';
+      badge.textContent = `Training… ${d.training_samples}/${d.min_samples_needed}`;
+      badge.style.cssText = 'font-size:.75rem;padding:2px 8px;border-radius:12px;background:#1c0a00;color:#f59e0b;border:1px solid #92400e';
+      bar.style.width = pct + '%'; bar.style.background = '#f59e0b';
     }
     document.getElementById('ml-samples').textContent   = d.training_samples;
     document.getElementById('ml-anomalies').textContent = d.total_anomalies;
     document.getElementById('ml-rate').textContent      = Math.round(d.anomaly_rate * 100) + '%';
   } catch(e) {}
 }
-
 function sevBadge(s) {
   const m = {critical:'background:#1a0505;color:#fca5a5;border:1px solid #7f1d1d',
              high:'background:#450a0a;color:#fca5a5;border:1px solid #991b1b',
@@ -435,7 +563,6 @@ function sevBadge(s) {
              low:'background:#052e16;color:#86efac;border:1px solid #166534'};
   return `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:700;${m[s]||'background:var(--surface2);color:var(--muted)'}">${(s||'—').toUpperCase()}</span>`;
 }
-
 function sBadge(s) {
   return {
     active:  '<span style="color:var(--danger);font-size:.8rem;font-weight:600">● active</span>',
@@ -443,7 +570,6 @@ function sBadge(s) {
     ignored: '<span style="color:var(--muted);font-size:.8rem">— ignored</span>',
   }[s] || s;
 }
-
 function wsStatus(state) {
   const el = document.getElementById('ws-indicator');
   const c = { connected:{t:'⬤ Live',bg:'#052e16',col:'#86efac',b:'#166534'},
@@ -453,27 +579,25 @@ function wsStatus(state) {
   el.textContent = c.t; el.style.background = c.bg;
   el.style.color = c.col; el.style.borderColor = c.b;
 }
-
 function flash(id, color) {
   const el = document.getElementById(id);
   el.style.background = color;
   setTimeout(() => el.style.background = '#374151', 250);
 }
-
 function toast(msg, color = 'var(--text)') {
   const t = document.getElementById('toast');
   t.textContent = msg; t.style.color = color; t.style.borderColor = color;
   t.style.transform = 'translateY(0)'; t.style.opacity = '1';
   clearTimeout(t._t);
-  t._t = setTimeout(() => { t.style.transform='translateY(120px)'; t.style.opacity='0'; }, 3500);
+  t._t = setTimeout(() => { t.style.transform='translateY(120px)'; t.style.opacity='0'; }, 4000);
 }
 
 document.head.insertAdjacentHTML('beforeend',
   '<style>@keyframes fadeIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}.filter-btn.active{border-color:var(--primary)!important;color:var(--text)!important}</style>');
 
 filterAlerts('all');
-setInterval(refreshStats, 10000);
-setInterval(refreshMLStats, 5000);
+setInterval(refreshStats,    10000);
+setInterval(refreshMLStats,  5000);
 refreshMLStats();
 </script>
 {% endblock %}
