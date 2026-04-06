@@ -24,7 +24,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 
-CSV_PATH     = r"C:\Users\aiswa\Downloads\Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv"
+CSV_PATH     = r"/app/data.csv"
 OUTPUT_MODEL = os.path.join("app", "ml", "rf_model.pkl")
 OUTPUT_META  = os.path.join("app", "ml", "rf_meta.pkl")
 

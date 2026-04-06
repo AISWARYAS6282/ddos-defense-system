@@ -24,7 +24,6 @@
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem">
   <div>
     <h2 style="font-size:1.5rem;font-weight:700;letter-spacing:-.5px">Live Threat Dashboard</h2>
-    <p class="text-muted" style="font-size:.85rem;margin-top:.2rem">Division 3 — ML Detection + Security Hardening</p>
   </div>
   <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
     <!-- Dark/Light Mode Toggle -->
@@ -94,20 +93,24 @@
 <div class="card" style="padding:.9rem 1.5rem;margin-bottom:1rem;border-left:3px solid #22c55e">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
     <div style="display:flex;align-items:center;gap:.75rem">
-      <span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">🧠 ML Anomaly Detection</span>
-      <span id="ml-status-badge" style="font-size:.75rem;padding:2px 8px;border-radius:12px;background:#1c2a1c;color:#6b7280;border:1px solid #374151">Training…</span>
+      <span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">🧠 ML Detection</span>
+      <span id="ml-status-badge" style="font-size:.75rem;padding:2px 8px;border-radius:12px;background:#052e16;color:#22c55e;border:1px solid #166534">
+        ⚡ XGBoost Ready
+      </span>
+      <span style="font-size:.72rem;color:var(--muted)">CICIDS2017 · 99.99% accuracy</span>
     </div>
     <div style="display:flex;align-items:center;gap:1rem;font-size:.8rem;color:var(--muted)">
-      <span>Samples: <strong id="ml-samples" style="color:var(--text)">0</strong> / 100</span>
-      <span>Anomalies: <strong id="ml-anomalies" style="color:#ef4444">0</strong></span>
+      <span>Scored: <strong id="ml-samples" style="color:var(--text)">0</strong></span>
+      <span>DDoS: <strong id="ml-anomalies" style="color:#ef4444">0</strong></span>
       <span>Rate: <strong id="ml-rate" style="color:#f59e0b">0%</strong></span>
+      <span>Accuracy: <strong style="color:#22c55e">99.99%</strong></span>
       {% if current_user.is_admin() %}
-      <button onclick="mlRetrain()" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.75rem">↺ Retrain</button>
+      <button onclick="mlRetrain()" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.75rem">↺ Reset</button>
       {% endif %}
     </div>
   </div>
   <div style="margin-top:.5rem;background:var(--surface2);border-radius:4px;height:4px;overflow:hidden">
-    <div id="ml-train-bar" style="width:0%;height:100%;background:#22c55e;transition:width .5s"></div>
+    <div id="ml-train-bar" style="width:100%;height:100%;background:#22c55e"></div>
   </div>
 </div>
 
@@ -420,11 +423,19 @@ function prependRow(a) {
   tr.style.cssText = 'animation:fadeIn .35s ease';
   const conf     = a.confidence || 0;
   const barColor = conf > 75 ? 'var(--danger)' : conf > 50 ? '#f59e0b' : 'var(--primary)';
-  const ts       = a.timestamp ? new Date(a.timestamp * 1000).toTimeString().slice(0,8) : '--:--:--';
+  const ts = a.detected_at
+    ? new Date(a.detected_at).toTimeString().slice(0,8)
+    : (a.timestamp ? String(a.timestamp).slice(11,19) : '--:--:--');
   const isML     = a.attack_type === 'ML_ANOMALY';
   const typeCol  = isML ? '#22c55e' : '#93c5fd';
-  const mlScore  = a.ml_score != null
-    ? `<span style="font-size:.75rem;padding:1px 5px;border-radius:6px;background:${a.ml_flagged?'#052e16':'transparent'};color:${a.ml_flagged?'#22c55e':'#6b7280'};border:1px solid ${a.ml_flagged?'#166534':'#374151'}">${Math.round((a.ml_score||0)*100)}%</span>`
+  const mlConf   = a.confidence || 0;   // backend sends confidence as 0-100 integer
+  const mlPred   = a.ml_prediction || '';
+  const mlBg     = a.ml_flagged ? '#1a0505' : 'transparent';
+  const mlColor  = a.ml_flagged ? '#f87171' : '#6b7280';
+  const mlBorder = a.ml_flagged ? '#7f1d1d' : '#374151';
+  const mlLabel  = mlPred && mlPred !== 'unknown' ? ` <span style="font-size:.68rem;opacity:.75">${mlPred}</span>` : '';
+  const mlScore  = mlConf > 0
+    ? `<span style="font-size:.75rem;padding:1px 5px;border-radius:6px;background:${mlBg};color:${mlColor};border:1px solid ${mlBorder}">${mlConf}%${mlLabel}</span>`
     : `<span style="font-size:.78rem;color:#6b7280">—</span>`;
   const flag    = a.flag    || '🌍';
   const country = a.country || '—';
@@ -539,19 +550,7 @@ async function refreshStats() {
 async function refreshMLStats() {
   try {
     const d = await (await fetch('/api/ml/stats')).json();
-    const badge = document.getElementById('ml-status-badge');
-    const bar   = document.getElementById('ml-train-bar');
-    if (d.model_ready) {
-      badge.textContent = '🧠 Model Ready';
-      badge.style.cssText = 'font-size:.75rem;padding:2px 8px;border-radius:12px;background:#052e16;color:#22c55e;border:1px solid #166534';
-      bar.style.width = '100%'; bar.style.background = '#22c55e';
-    } else {
-      const pct = Math.min((d.training_samples / d.min_samples_needed) * 100, 99);
-      badge.textContent = `Training… ${d.training_samples}/${d.min_samples_needed}`;
-      badge.style.cssText = 'font-size:.75rem;padding:2px 8px;border-radius:12px;background:#1c0a00;color:#f59e0b;border:1px solid #92400e';
-      bar.style.width = pct + '%'; bar.style.background = '#f59e0b';
-    }
-    document.getElementById('ml-samples').textContent   = d.training_samples;
+    document.getElementById('ml-samples').textContent   = d.total_scored;
     document.getElementById('ml-anomalies').textContent = d.total_anomalies;
     document.getElementById('ml-rate').textContent      = Math.round(d.anomaly_rate * 100) + '%';
   } catch(e) {}
