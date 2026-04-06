@@ -122,10 +122,4 @@ ddos-defense-system/
 
 ---
 
-## Division Roadmap
 
-- **Division 1** ✅ Foundation, auth, DB, simulator, sandbox stub
-- Division 2 — Detection engine
-- Division 3 — Real blocking via iptables
-- Division 4 — Dashboard & alerting
-- Division 5 — Hardening & reporting
