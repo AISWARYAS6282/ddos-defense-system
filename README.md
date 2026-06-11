@@ -1,125 +1,142 @@
-# DDoS Defense System — Division 1
+# DDoS Defense System
 
-Secure foundation: authentication, database models, simulator, and sandboxed blocking agent.
+A full-stack, production-architecture DDoS detection and automated response platform.
+Detects attacks in real time using a three-layer pipeline — rule engine, 
+ML anomaly detection, and an XGBoost classifier trained on the CICIDS2017 dataset.
+
+Built across three development divisions, evolving from a basic Flask scaffold 
+to a containerized, ML-powered security system with a live dashboard.
 
 ---
 
-## Quick Start
+## Architecture
 
-### 1. Clone & Configure
-```bash
-git clone <your-repo>
-cd ddos-defense-system
-cp .env.example .env
-# Edit .env with your secrets
+```
+                  ┌─────────────┐
+   Browser ──────▶│  nginx HTTPS │
+                  └──────┬──────┘
+                         │
+                  ┌──────▼──────┐       ┌──────────────────┐
+                  │  Flask App  │──────▶│  Sandbox Agent   │
+                  │  (web:5000) │       │  (block exec)    │
+                  └──────┬──────┘       └──────────────────┘
+                         │
+                  ┌──────▼──────┐
+                  │  PostgreSQL │
+                  └─────────────┘
 ```
 
-### 2. Run with Docker Compose
+Three Docker services with isolated networks — the main app never directly 
+executes IP blocks; it delegates to a sandboxed agent, enforcing least privilege.
+
+---
+
+## Detection Pipeline
+
+### Layer 1 — Rule Engine
+Sliding-window packet analysis across 60s and 300s intervals.
+Detects: SYN Flood, UDP Flood, HTTP Flood, ICMP Flood, DNS Amplification.
+Assigns severity (low / medium / high / critical) with confidence scores.
+
+### Layer 2 — ML Anomaly Detection (Isolation Forest)
+Trained on live normal traffic (auto-retrains at 100+ samples).
+Catches novel attack patterns that rules miss.
+Model persists to disk and reloads on restart.
+
+### Layer 3 — XGBoost Classifier
+Trained on the [CICIDS2017](https://www.unb.ca/cic/datasets/ids-2017.html) 
+intrusion detection dataset (~500K flows).
+Zero data-leakage training: scaler and variance filter fit on train split only.
+
+---
+
+## Features
+
+- **Live dashboard** — WebSocket-powered real-time alert feed
+- **Auto-block** — IPs triggering 3+ alerts within 5 minutes are automatically blocked
+- **Role-based access** — Admin (full control) and Operator (view + block) roles
+- **Audit log** — All block/unblock actions exportable as CSV
+- **Traffic simulator** — Synthetic attack/normal event generator for testing
+- **Health & metrics API** — `/api/health` and `/api/metrics` endpoints
+- **Rate limiting** — API endpoints protected via Flask-Limiter
+- **HTTPS** — nginx with self-signed cert (swap for Let's Encrypt in production)
+- **CI** — GitHub Actions pipeline runs tests on every push
+
+---
+
+## Quick Start (Docker)
+
 ```bash
+git clone https://github.com/AISWARYAS6282/ddos-defense-system.git
+cd ddos-defense-system
+
+# Generate SSL cert (first time only)
+bash nginx/generate_cert.sh
+
+# Configure environment
+cp .env.example .env
+
+# Start all services
 docker-compose up --build -d
 docker-compose exec web flask db upgrade
 docker-compose exec web python seed.py
 ```
 
-### 3. Access
-- Web UI: http://localhost:5000
-- Login: admin / Admin1234! (or operator / Operator1234!)
-- Sandbox Agent API: http://localhost:5001
+Access at **https://localhost**
+
+| User     | Password     | Role     |
+|----------|--------------|----------|
+| admin    | Admin1234!   | Admin    |
+| operator | Operator1234!| Operator |
 
 ---
 
-## Local Development (without Docker)
+## Local Development (no Docker)
 
 ```bash
-python -m venv venv
-source venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 export FLASK_APP=run.py
-export FLASK_ENV=development
 export DATABASE_URL=sqlite:///dev.db
 
-flask db init
-flask db migrate -m "initial"
-flask db upgrade
+flask db init && flask db migrate -m "init" && flask db upgrade
 python seed.py
 python run.py
 ```
 
 ---
 
-## Simulator
-
-Emits JSON events to stdout based on fixed IP pools:
+## Running Tests
 
 ```bash
-python simulator/simulator.py
-# or with custom rate:
-SIM_RATE=5 python simulator/simulator.py
+docker-compose exec web pytest tests/
 ```
 
 ---
 
-## Sandbox Agent
+## Tech Stack
 
-Test the block API stub (no real iptables):
-
-```bash
-curl -X POST http://localhost:5001/apply_block \
-  -H "Authorization: Bearer change-me-sandbox-token" \
-  -H "Content-Type: application/json" \
-  -d '{"ip": "192.168.100.10", "action": "BLOCK"}'
-```
-
----
-
-## Branch Strategy
-
-- `main` — stable, production-ready code only
-- `dev` — integration branch
-- `feature/<name>` — individual features
-- `division/<n>` — division-level branches
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python, Flask, Flask-SocketIO, Flask-Login |
+| Database | PostgreSQL (prod), SQLite (dev) |
+| ML | scikit-learn (Isolation Forest), XGBoost, CICIDS2017 dataset |
+| Infrastructure | Docker, Docker Compose, nginx, GitHub Actions CI |
+| Security | Argon2 password hashing, JWT, Flask-Limiter, sandboxed block agent |
 
 ---
 
-## Project Structure
+## Dataset
 
-```
-ddos-defense-system/
-├── app/
-│   ├── __init__.py          # App factory
-│   ├── config.py            # Config classes
-│   ├── extensions.py        # Flask extensions
-│   ├── blueprints/
-│   │   ├── auth/            # Login/logout
-│   │   ├── dashboard/       # Main UI
-│   │   └── api/             # REST API
-│   ├── models/              # SQLAlchemy models
-│   └── templates/           # Jinja2 HTML
-├── simulator/
-│   ├── simulator.py         # Event generator
-│   └── ip_pools.json        # IP pool config
-├── sandbox_agent/
-│   ├── agent.py             # Flask stub agent
-│   ├── Dockerfile
-│   └── requirements.txt
-├── migrations/              # Flask-Migrate
-├── docker-compose.yml
-├── Dockerfile
-├── run.py
-├── seed.py
-└── requirements.txt
-```
+The XGBoost model is trained on the **CICIDS2017 Friday DDoS** dataset.
+Due to file size (~500MB), the CSV is not included in this repo.
+Download from: https://www.unb.ca/cic/datasets/ids-2017.html
+Place as `data.csv` in the project root, then run `python train_model.py`.
 
 ---
 
-## Roles
+## Disclaimer
 
-| Role     | Permissions                          |
-|----------|--------------------------------------|
-| admin    | Full access, user management         |
-| operator | View dashboard, trigger blocks       |
-
----
-
-
+This system is for educational purposes and authorized lab environments only.
+The traffic simulator generates synthetic events — no real network packets are sent.
